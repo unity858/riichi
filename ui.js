@@ -1,6 +1,6 @@
 // Renders the server-provided view and sends discard intents. No game logic here.
 
-import { tileLabel, WINDS } from './game.js';
+import { tileLabel, kindLabel, getWaits, WINDS } from './game.js';
 
 const infoEl = document.getElementById('info');
 const newHandBtn = document.getElementById('new-hand');
@@ -76,6 +76,15 @@ function renderSeat(el, player, game, you) {
     }
   }
   el.appendChild(hand);
+
+  // Between your turns, show your own waits.
+  if (player.seat === you && player.hand && !player.drawn) {
+    const waits = getWaits(player.hand);
+    const line = document.createElement('div');
+    line.className = 'waits';
+    line.textContent = waits.length ? `Tenpai: waits ${waits.map(kindLabel).join(' ')}` : 'Not tenpai';
+    el.appendChild(line);
+  }
 
   const pond = document.createElement('div');
   pond.className = 'pond';

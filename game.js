@@ -122,6 +122,95 @@ export function discard(state, tileId) {
   return tile;
 }
 
+// --- Hand shape analysis ---
+// Tile kinds are indexed 0-33: m1-9 = 0-8, p1-9 = 9-17, s1-9 = 18-26, z1-7 = 27-33.
+// Red fives count as normal fives.
+
+const TERMINALS_AND_HONORS = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
+
+export function tileIndex(tile) {
+  return SUITS.indexOf(tile.suit) * 9 + tile.rank - 1;
+}
+
+export function kindLabel(index) {
+  const suit = SUITS[Math.floor(index / 9)];
+  const rank = (index % 9) + 1;
+  return suit === 'z' ? HONOR_NAMES[rank - 1] : `${rank}${suit}`;
+}
+
+export function toCounts(tiles) {
+  const counts = new Array(34).fill(0);
+  for (const t of tiles) counts[tileIndex(t)]++;
+  return counts;
+}
+
+// True if the counts split entirely into triplets and sequences.
+// The lowest remaining tile must belong to some set, so only two branches need trying.
+function canFormSets(counts) {
+  const i = counts.findIndex((c) => c > 0);
+  if (i === -1) return true;
+
+  if (counts[i] >= 3) {
+    counts[i] -= 3;
+    const ok = canFormSets(counts);
+    counts[i] += 3;
+    if (ok) return true;
+  }
+  if (i < 27 && i % 9 <= 6 && counts[i + 1] > 0 && counts[i + 2] > 0) {
+    counts[i]--; counts[i + 1]--; counts[i + 2]--;
+    const ok = canFormSets(counts);
+    counts[i]++; counts[i + 1]++; counts[i + 2]++;
+    if (ok) return true;
+  }
+  return false;
+}
+
+function isStandardComplete(counts) {
+  for (let k = 0; k < 34; k++) {
+    if (counts[k] < 2) continue;
+    counts[k] -= 2;
+    const ok = canFormSets(counts);
+    counts[k] += 2;
+    if (ok) return true;
+  }
+  return false;
+}
+
+// Seven distinct pairs; four of a kind does not count as two pairs.
+function isChiitoitsu(counts) {
+  return counts.filter((c) => c === 2).length === 7;
+}
+
+function isKokushi(counts) {
+  const total = counts.reduce((a, b) => a + b, 0);
+  return total === 14 && TERMINALS_AND_HONORS.every((k) => counts[k] >= 1) &&
+    TERMINALS_AND_HONORS.reduce((sum, k) => sum + counts[k], 0) === 14;
+}
+
+// Complete winning shape. Works for closed tiles of size 3n+2 (open melds excluded);
+// chiitoitsu and kokushi only match a full 14-tile closed hand.
+export function isComplete(counts) {
+  return isStandardComplete(counts) || isChiitoitsu(counts) || isKokushi(counts);
+}
+
+// Tile kinds (as indices) that would complete the hand.
+// Empty tenpai (karaten) counts as ready here: a wait on a kind whose four copies
+// are all in your own hand or already visible is still reported.
+export function getWaits(tiles) {
+  const counts = toCounts(tiles);
+  const waits = [];
+  for (let k = 0; k < 34; k++) {
+    counts[k]++;
+    if (isComplete(counts)) waits.push(k);
+    counts[k]--;
+  }
+  return waits;
+}
+
+export function isTenpai(tiles) {
+  return getWaits(tiles).length > 0;
+}
+
 // Debug helper: confirms every tile id appears exactly once.
 export function checkIntegrity(state) {
   const ids = [
