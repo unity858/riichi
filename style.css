@@ -1,0 +1,97 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: system-ui, sans-serif;
+  background: #1f5e3a;
+  color: #f4f4f4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#table {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  grid-template-rows: auto 1fr auto;
+  grid-template-areas:
+    ". top ."
+    "left center right"
+    ". bottom .";
+  gap: 16px;
+  padding: 16px;
+  width: min(1200px, 100vw);
+}
+
+.seat-top    { grid-area: top; }
+.seat-left   { grid-area: left; }
+.seat-right  { grid-area: right; }
+.seat-bottom { grid-area: bottom; }
+
+#center {
+  grid-area: center;
+  background: #174a2d;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+#info div { margin: 2px 0; }
+#info .status { font-weight: bold; font-size: 1.1em; }
+.hint { font-size: 0.8em; opacity: 0.7; margin: 0; }
+
+.seat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 8px;
+  border: 2px solid transparent;
+}
+.seat.active { border-color: #ffd54a; }
+
+.seat-name { font-size: 0.9em; font-weight: bold; }
+.seat-name .dealer { color: #ffd54a; margin-left: 4px; }
+
+.hand, .pond { display: flex; flex-wrap: wrap; gap: 3px; }
+.hand .drawn { margin-left: 12px; }
+
+.pond {
+  display: grid;
+  grid-template-columns: repeat(6, max-content);
+  min-height: 44px;
+}
+
+.tile {
+  width: 34px;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fbf8ee;
+  border: 1px solid #999;
+  border-bottom-width: 4px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 14px;
+  user-select: none;
+}
+.pond .tile { width: 28px; height: 38px; font-size: 12px; }
+
+.tile.m { color: #c62828; }
+.tile.p { color: #1565c0; }
+.tile.s { color: #2e7d32; }
+.tile.z { color: #222; }
+.tile.red { background: #ffe1e1; color: #d50000; }
+
+.tile.back { background: #e0a030; border-color: #8a5a10; }
+
+.tile.clickable { cursor: pointer; }
+.tile.clickable:hover { transform: translateY(-6px); }
+.tile.last-drawn { outline: 2px solid #ffd54a; }

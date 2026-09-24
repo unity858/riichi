@@ -1,0 +1,604 @@
+▗ ▗   ▖ ▖  Claude Code v2.1.281
+           Opus 5.5 · API Usage Billing
+  ▘▘ ▝▝    ~/foo
+
+ℹ This workspace is part of Anthropic's vendor program. Conversations and activity may be reviewed by Anthropic and used to train and improve our models
+
+❯ /clear                                                                        
+
+❯ i want to code a riichi mahjong with vanilla html frontend. do NOT worry      
+  about action validation yet, i just want tile dealing and turn processing     
+  first.                                                                        
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ User declined to answer questions
+  ⎿  · Who controls the 4 seats for now? (You + 3 simple bots (Recommended) / 
+     Hot-seat, all 4 human)
+     · How should tiles be rendered? (Unicode mahjong glyphs (Recommended) / 
+     Text labels)
+
+✻ Cooked for 8s · done 5:13 PM
+
+❯ use plaintext inside boxes for tiles for now. we can replace them with svgs   
+  in a later stage.                                                             
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/i-want-to-code-swirling-alpaca.md · /plan to
+     edit
+     Riichi Mahjong: tile dealing + turn loop (vanilla HTML/JS)
+
+     Context
+
+     Starting a riichi mahjong game from scratch in an empty directory
+     (/Users/nya/foo). This first stage covers only the wall, dealing, and the
+     draw→discard turn cycle. No action validation: no calls (chi/pon/kan/ron),
+     no riichi, no win detection, no scoring. Tiles show as plaintext inside
+     styled boxes for now (e.g. 1m, 5p, E, Wh). The data model keeps rendering
+     in one function so SVGs can replace the text later.
+
+     Files
+
+     - index.html: layout with 4 seat areas (the human seat at the bottom, the
+       others at left/top/right), a center info panel (round wind, dealer, tiles
+       left in the wall, whose turn), a discard pond per seat, and a "New Hand"
+       button.
+     - style.css: tile box styling (fixed size, border, rounded corners, suit
+       colors: man red, pin blue, sou green, honors black), plus a highlight for
+       the drawn tile and a grid-wrapped discard pond (6 per row).
+     - game.js: the game state and turn logic, with no DOM access.
+     - ui.js: rendering and event wiring. Loaded as ES modules (<script 
+       type="module">).
+
+     Data model (game.js)
+
+     - Tile: { id: 0..135, suit: 'm'|'p'|'s'|'z', rank: 1..9 (honors 1..7 = E S 
+       W N Wh G R), red: bool }. The 136 tiles are 4 copies of 34 kinds, and one
+       of each 5m/5p/5s is red (0m style label, shown in red).
+     - tileLabel(tile): the one place that turns a tile into text. It becomes
+       the SVG hook later.
+     - createWall() builds the 136 tiles and shuffles them with Fisher–Yates.
+     - State:
+     { wall, deadWall /*14*/, doraIndicators, players: [{ seat, hand, drawn,
+     discards }],
+       dealer, current, phase: 'draw'|'discard'|'ended', roundWind }
+     - newHand(): shuffles, splits off 14 tiles as the dead wall and flips 1
+       dora indicator. It deals in the real order: 3 rounds of 4 tiles each to
+       each player, then 1 more tile each. Then the dealer draws their 14th
+       tile, so play starts in the dealer's discard phase.
+     - draw(state): pops from the live wall into players[current].drawn. If the
+       wall is empty, sets phase='ended' (exhaustive draw).
+     - discard(state, tileId): removes the tile from the hand or the drawn slot,
+       merges drawn into the hand, sorts the hand, pushes the tile onto
+       discards, and moves current = (current+1)%4 with phase='draw'.
+     - sortHand: orders tiles by suit (m, p, s, z), then rank.
+
+     Turn processing (ui.js)
+
+     - One step() loop: in the draw phase, it calls draw() automatically, then
+       re-renders.
+     - The human seat (seat 0, dealer/East to start) discards by clicking a tile
+       in their hand, including the drawn tile, which is shown slightly
+       separated on the right.
+     - Seats 1–3 are simple bots: after a delay of about 400 ms they discard
+       their drawn tile (tsumogiri). I chose this default because the seat
+       question went unanswered. Switching to hot-seat only means dropping the
+       bot branch and making every hand clickable.
+     - Opponent hands render face-down (blank boxes). A "show all hands" debug
+       checkbox reveals them.
+     - When the hand ends, the info panel shows "Exhaustive draw" and the "New
+       Hand" button restarts. No dealer rotation yet.
+
+     Verification
+
+     - Open index.html directly in a browser, or run python3 -m http.server in
+       /Users/nya/foo because ES modules may need http.
+     - Check that each player starts with 13 tiles, the dealer has 14, and the
+       wall counter reads 136 − 14 (dead wall) − 53 = 69.
+     - Click discards and watch the turn rotate E→S→W→N, the ponds fill, and the
+       wall count drop by 1 per draw.
+     - Let the hand run to wall exhaustion (bots are fast; add a "discard drawn"
+       key shortcut for the human) and confirm the ended state and that New
+       Hand resets.
+     - Sanity-check in the console: all 136 tile ids are unique across wall,
+       dead wall, hands, and ponds at any point.
+
+⏺ Auto mode lets Claude handle permission prompts automatically — Claude
+  checks each tool call for risky actions and prompt injection before 
+  executing. Actions Claude identifies as safe are executed, while 
+  actions Claude identifies as risky are blocked and Claude may try a 
+  different approach. Ideal for long-running tasks. Sessions are 
+  slightly more expensive. Claude can make mistakes that allow harmful 
+  commands to run, it's recommended to only use in isolated 
+  environments. Shift+Tab to change mode.
+
+⏺ Write(game.js)
+  ⎿  Wrote 134 lines to game.js
+       1 // Core game state and turn logic. No DOM access here.
+       2 
+       3 export const SUITS = ['m', 'p', 's', 'z'];
+       4 export const HONOR_NAMES = ['E', 'S', 'W', 'N', 'Wh', 'G', 'R'];
+       5 export const WINDS = ['E', 'S', 'W', 'N'];
+       7 // Build the 136 tiles: 4 copies of 34 kinds, one red five per n
+         umber suit.
+       8 export function createTiles() {
+       9   const tiles = [];
+      10   let id = 0;
+     … +129 lines (ctrl+o to expand)
+
+⏺ Write(index.html)
+  ⎿  Wrote 26 lines to index.html
+       1 <!DOCTYPE html>
+       2 <html lang="en">
+       3 <head>
+       4   <meta charset="UTF-8">
+       5   <meta name="viewport" content="width=device-width, initial-sca
+       6   <title>Riichi Mahjong</title>
+       7   <link rel="stylesheet" href="style.css">
+       8 </head>
+       9 <body>
+      10   <div id="table">
+     … +19 lines (ctrl+o to expand)
+
+⏺ Write(style.css)
+  ⎿  Wrote 97 lines to style.css
+       1 * { box-sizing: border-box; }
+       2 
+       3 body {
+       4   margin: 0;
+       5   min-height: 100vh;
+       6   font-family: system-ui, sans-serif;
+       7   background: #1f5e3a;
+       8   color: #f4f4f4;
+       9   display: flex;
+      10   align-items: center;
+     … +87 lines (ctrl+o to expand)
+
+❯ also we shoukd be using websockets so 4 players all manually click discards.  
+
+⏺ Switching to a WebSocket server: 4 clients, each gets a seat and clicks their
+  own discards. game.js stays the same and runs on the server. I'll check what
+  runtime is available.
+
+⏺ Bash(node --version; npm --version)
+  ⎿  Error: Exit code 127
+     (eval):1: command not found: node
+     (eval):1: command not found: npm
+
+⏺ Bash(which bun deno python3 go; python3 --version; python3 -c "import
+      websockets; print(websockets.__version__)" 2>&1; ls /opt/homebrew/bin
+      2>/dev/null | head -50)
+  ⎿  bun not found
+     deno not found
+     /usr/bin/python3
+     … +5 lines (ctrl+o to expand)
+
+⏺ Neither Node nor any WebSocket library is installed. The only runtime here is
+  the system Python 3.9 with no extra packages, and Homebrew isn't installed
+  either. Which backend should I use?
+
+⏺ User answered Claude's questions:
+  ⎿  · No Node/Bun/Deno here, only system Python 3.9 with no packages. How 
+     should the WebSocket server run? → Node + ws (you install Node)
+
+⏺ Going with Node + ws. Now the server, package.json, and the client:
+
+⏺ Write(package.json)
+  ⎿  Wrote 12 lines to package.json
+       1 {
+       2   "name": "riichi-mahjong",
+       3   "version": "0.1.0",
+       4   "private": true,
+       5   "type": "module",
+       6   "scripts": {
+       7     "start": "node server.js"
+       8   },
+       9   "dependencies": {
+      10     "ws": "^8.18.0"
+     … +2 lines (ctrl+o to expand)
+
+⏺ Write(server.js)
+  ⎿  Wrote 113 lines to server.js
+      1 // HTTP static file server + WebSocket game server. The server ow
+        ns the game state;
+      2 // clients only send intents and render the view they're given.
+      3 
+      4 import http from 'node:http';
+      6 import path from 'node:path';
+      7 import { fileURLToPath } from 'node:url';
+      8 import { WebSocketServer } from 'ws';
+      9 import { newHand, draw, discard, checkIntegrity } from './game.js
+        ';
+     … +113 lines (ctrl+o to expand)
+
+⏺ Write(ui.js)
+  ⎿  Wrote 131 lines to ui.js
+       1 // Renders the server-provided view and sends discard intents. N
+         o game logic here.
+       2 
+       3 import { tileLabel, WINDS } from './game.js';
+       4 
+       6 const newHandBtn = document.getElementById('new-hand');
+       7 const seatEls = {
+       8   bottom: document.querySelector('.seat-bottom'),
+       9   right: document.querySelector('.seat-right'),
+      10   top: document.querySelector('.seat-top'),
+     … +144 lines (ctrl+o to expand)
+
+⏺ The server hides opponents' hands, so the "Show all hands" checkbox no longer
+  does anything. Removing it:
+⏺ Update(index.html)
+  ⎿  Removed 1 line
+      14        <div id="info"></div>
+      15        <div id="controls">
+      16          <button id="new-hand">New Hand</button>
+      17 -        <label><input type="checkbox" id="show-all"> Show all h
+         -ands</label>                                                   
+      17        </div>
+      18        <p class="hint">Click a tile to discard. Press <kbd>Space
+          </kbd> to discard the drawn tile.</p>
+      19      </section>
+
+⏺ Bash(python3 - <<'EOF'
+      # Quick static sanity check of the file set (node isn't available to run
+      it).…)
+  ⎿  index.html 831
+     style.css 2144
+     game.js 3679
+     … +3 lines (ctrl+o to expand)
+
+⏺ I've built 4-player multiplayer over WebSockets: each player clicks their own
+  discards. None of it has been run yet. Node isn't installed on this machine,
+  so I haven't started the server or opened a browser.
+
+  To run it:
+  1. Install Node (the nodejs.org installer is fine).
+  2. cd ~/foo && npm install && npm start
+  3. Open http://localhost:8080 in 4 browser tabs. Each tab takes the next free
+     seat, and the first hand is dealt when the 4th player joins. Any
+     connections after that just watch.
+
+  How it works:
+  - game.js: builds the 136 tiles (with one red 5 per suit), shuffles, and sets
+    aside 14 tiles as the dead wall with one dora indicator. It deals in the
+    real order (4-4-4 then 1 each), and the dealer then draws their 14th tile.
+    Each discard passes the turn to the next seat, and the next player draws
+    automatically. The hand ends in a draw when the wall runs out. The server
+    and browser share this file.
+  - server.js: serves the page files and holds the only copy of the game state.
+    Each player is sent only their own tiles; opponents show as face-down tiles,
+    plus everyone's discards. The server ignores discards from anyone whose
+    turn it isn't. That's the only check, and it's there so four people can't
+    discard at once; there's no other rule checking.
+  - ui.js: draws whatever the server sends. Your seat is always at the bottom,
+    with the next player on your right. Click a tile to discard it, or press
+    Space to discard the tile you just drew. Any seated player can press "New
+    Hand".
+  - Tiles are text in boxes (1m, 0p for a red five, E, Wh, …). All the text
+    comes from tileLabel() in game.js, so that's the one place to swap in SVGs
+    later.
+
+  Changes from the plan:
+  - The 3 bots are gone.
+  - The "show all hands" checkbox is gone, because the server doesn't send other
+    players' tiles.
+
+  Known gaps:
+  - If someone disconnects, their seat opens up and the next person to connect
+    takes it. There's no way to reclaim a specific seat.
+  - The dealer doesn't rotate between hands.
+
+  When the first hand is dealt, the server log prints an integrity result that
+  should be true, meaning every tile appears exactly once. The wall counter
+  should start at 69.
+
+✻ Baked for 1m 51s · done 5:16 PM
+
+❯ how do i start the server? do NOT start it yourself, let me manually do that. 
+
+⏺ You need Node first, since it isn't installed on this machine. Then run it
+  from a terminal.
+
+  1. Install Node (one time)
+
+  Download the LTS installer from https://nodejs.org and run it. Afterwards,
+  open a new terminal and check it worked:
+  node --version
+  npm --version
+
+  2. Install the one dependency (one time)
+  cd ~/foo
+  npm install
+  This installs the ws package into ~/foo/node_modules.
+
+  3. Start the server
+  npm start
+  It should print:
+  Mahjong server on http://localhost:8080
+  Leave that terminal open; the server stops when you close it or press Ctrl+C.
+
+  4. Play
+
+  Open http://localhost:8080 in 4 browser tabs. Each tab takes the next free
+  seat, and the first hand is dealt when the 4th tab connects.
+
+  Other options:
+  - Different port: PORT=3000 npm start if 8080 is already in use.
+  - Other computers: players on the same network can join at
+    http://<your-computer's-local-IP>:8080. macOS may ask whether to allow
+    incoming connections for node.
+
+✻ Churned for 4s · done 5:17 PM
+
+❯ can you install node and the dependency?                                      
+
+⏺ I'll install Node without sudo using the official prebuilt tarball, put it in
+  ~/.local/node, then install ws. First, the architecture and the current LTS
+  version:
+
+⏺ Bash(uname -m; curl -fsSL https://nodejs.org/dist/index.json | python3 -c
+      "import json,sys; d=json.load(sys.stdin); print(next(r['version'] for r in
+      d if r['lts']))")
+  ⎿  arm64
+     v24.21.0
+
+⏺ Bash(set -e
+      V=v24.21.0; F=node-$V-darwin-arm64…)
+  ⎿  Error: Exit code 127
+     node-v24.21.0-darwin-arm64.tar.gz: OK
+     v24.21.0
+     env: node: No such file or directory
+
+⏺ Node installed and the checksum matched. npm only failed because node isn't on
+  PATH yet. Next I'll add Node to PATH in ~/.zshrc and install the dependency:
+
+⏺ Bash(touch ~/.zshrc
+      grep -q '.local/node/bin' ~/.zshrc || printf '\n# Node.js (installed to
+      ~/.local/node)\nexport PATH="$HOME/.local/node/bin:$PATH"\n' >> ~/.zshrc…)
+  ⎿  # Node.js (installed to ~/.local/node)
+     export PATH="$HOME/.local/node/bin:$PATH"
+     … +10 lines (ctrl+o to expand)
+
+⏺ Before you start it, I'll check the game logic directly in Node. This doesn't
+  start the server:
+
+⏺ Bash(~/.local/node/bin/node -e "
+      import('./game.js').then(({newHand, draw, discard, checkIntegrity}) => {…)
+  ⎿  hands [ 14, 13, 13, 13 ] wall 69 integrity true
+     ended after 70 discards, wall 0 integrity true
+
+⏺ Node and the ws package are installed, and I didn't start the server.
+
+  - Node v24.21.0 (current LTS) is in ~/.local/node. I used the official tarball
+    and checked it against the published checksum. No sudo or Homebrew was
+    needed.
+  - PATH: I added this line to the end of ~/.zshrc:
+  export PATH="$HOME/.local/node/bin:$PATH"
+  - ws is installed in ~/foo/node_modules.
+
+  Checks I ran (without starting the server):
+  - server.js and game.js pass a syntax check.
+  - I played a full hand in Node, always discarding the drawn tile. It dealt
+    14/13/13/13 tiles with 69 left in the wall, and ended in a draw after 70
+    discards. Every tile was accounted for exactly once after each turn.
+
+  To start it: open a new terminal so the PATH change applies (or run source 
+  ~/.zshrc in your current one), then:
+  cd ~/foo
+  npm start
+  Then open http://localhost:8080 in 4 tabs.
+
+  To remove Node later, delete ~/.local/node and that line in ~/.zshrc.
+
+✻ Baked for 32s · done 5:18 PM
+
+❯ What does the 0 tile mean- red five?                                          
+
+⏺ Yes, 0 means a red five. 0m, 0p and 0s are the red 5-man, 5-pin and 5-sou.
+
+  This is the standard shorthand in riichi notation, used by Tenhou and most
+  hand calculators. A red five is still a 5 in play; it just adds one dora when
+  it's in your hand. Writing it as 0 separates it from a normal 5 in short text.
+
+  Each suit has one red five out of its four 5s, and in the UI it also gets a
+  pinkish background (.tile.red in style.css). The label comes from tileLabel()
+  in game.js. If you'd rather see 5m in red, or something like 5m*, it's a
+  one-line change there, and the SVG tiles will replace it later anyway.
+
+✻ Worked for 4s · done 5:21 PM
+
+❯ was there a build involved in the dev process?                                
+
+⏺ No, there's no build step. The browser runs the files exactly as written:
+
+  - index.html, style.css and ui.js are plain HTML, CSS and JavaScript. ui.js
+    loads game.js using the browser's built-in import, so there's no bundler,
+    transpiler or TypeScript.
+  - server.js runs directly with node server.js (which is all npm start does).
+    "type": "module" in package.json just tells Node to use the same import
+    syntax.
+  - npm install isn't a build either. It only downloaded the ws package, which
+    the server uses for WebSockets.
+
+  When you edit a file:
+  - For the front end (index.html, style.css, ui.js), reload the browser tab.
+  - For server.js or game.js, restart the server (Ctrl+C, then npm start), since
+    the server loaded them at startup. Restarting also resets the current game.
+
+  If you'd like the server to restart automatically when files change, Node has
+  a built-in option, node --watch server.js, which still needs no build tools.
+
+✻ Brewed for 5s · done 5:23 PM
+
+※ recap: You're building a browser riichi mahjong game with a Node WebSocket server where four players deal and take turns discarding; it's written and Node is installed. Next, open a new terminal, run npm start in ~/foo, and open four browser tabs. (disable recaps in /config)
+
+❯ /plan                                                                         
+  ⎿  Current Plan
+     /Users/nya/.claude/plans/i-want-to-code-swirling-alpaca.md
+
+     Riichi Mahjong: tile dealing + turn loop (vanilla HTML/JS)
+
+     Context
+
+     Starting a riichi mahjong game from scratch in an empty directory
+     (/Users/nya/foo). This first stage covers only the wall, dealing, and the
+     draw→discard turn cycle. No action validation: no calls (chi/pon/kan/ron),
+     no riichi, no win detection, no scoring. Tiles show as plaintext inside
+     styled boxes for now (e.g. 1m, 5p, E, Wh). The data model keeps rendering
+     in one function so SVGs can replace the text later.
+
+     Files
+
+     - index.html: layout with 4 seat areas (the human seat at the bottom, the
+       others at left/top/right), a center info panel (round wind, dealer, tiles
+       left in the wall, whose turn), a discard pond per seat, and a "New Hand"
+       button.
+     - style.css: tile box styling (fixed size, border, rounded corners, suit
+       colors: man red, pin blue, sou green, honors black), plus a highlight for
+       the drawn tile and a grid-wrapped discard pond (6 per row).
+     - game.js: the game state and turn logic, with no DOM access.
+     - ui.js: rendering and event wiring. Loaded as ES modules (<script 
+       type="module">).
+
+     Data model (game.js)
+
+     - Tile: { id: 0..135, suit: 'm'|'p'|'s'|'z', rank: 1..9 (honors 1..7 = E S 
+       W N Wh G R), red: bool }. The 136 tiles are 4 copies of 34 kinds, and one
+       of each 5m/5p/5s is red (0m style label, shown in red).
+     - tileLabel(tile): the one place that turns a tile into text. It becomes
+       the SVG hook later.
+     - createWall() builds the 136 tiles and shuffles them with Fisher–Yates.
+     - State:
+     { wall, deadWall /*14*/, doraIndicators, players: [{ seat, hand, drawn,
+     discards }],
+       dealer, current, phase: 'draw'|'discard'|'ended', roundWind }
+     - newHand(): shuffles, splits off 14 tiles as the dead wall and flips 1
+       dora indicator. It deals in the real order: 3 rounds of 4 tiles each to
+       each player, then 1 more tile each. Then the dealer draws their 14th
+       tile, so play starts in the dealer's discard phase.
+     - draw(state): pops from the live wall into players[current].drawn. If the
+       wall is empty, sets phase='ended' (exhaustive draw).
+     - discard(state, tileId): removes the tile from the hand or the drawn slot,
+       merges drawn into the hand, sorts the hand, pushes the tile onto
+       discards, and moves current = (current+1)%4 with phase='draw'.
+     - sortHand: orders tiles by suit (m, p, s, z), then rank.
+
+     Turn processing (ui.js)
+
+     - One step() loop: in the draw phase, it calls draw() automatically, then
+       re-renders.
+     - The human seat (seat 0, dealer/East to start) discards by clicking a tile
+       in their hand, including the drawn tile, which is shown slightly
+       separated on the right.
+     - Seats 1–3 are simple bots: after a delay of about 400 ms they discard
+       their drawn tile (tsumogiri). I chose this default because the seat
+       question went unanswered. Switching to hot-seat only means dropping the
+       bot branch and making every hand clickable.
+     - Opponent hands render face-down (blank boxes). A "show all hands" debug
+       checkbox reveals them.
+     - When the hand ends, the info panel shows "Exhaustive draw" and the "New
+       Hand" button restarts. No dealer rotation yet.
+
+     Verification
+
+     - Open index.html directly in a browser, or run python3 -m http.server in
+       /Users/nya/foo because ES modules may need http.
+     - Check that each player starts with 13 tiles, the dealer has 14, and the
+       wall counter reads 136 − 14 (dead wall) − 53 = 69.
+     - Click discards and watch the turn rotate E→S→W→N, the ponds fill, and the
+       wall count drop by 1 per draw.
+     - Let the hand run to wall exhaustion (bots are fast; add a "discard drawn"
+       key shortcut for the human) and confirm the ended state and that New
+       Hand resets.
+     - Sanity-check in the console: all 136 tile ids are unique across wall,
+       dead wall, hands, and ponds at any point.
+
+     "/plan open" to edit this plan in Vim
+
+❯ How do I calculate whether a hand in mahjong is ready?                        
+
+⏺ Updated plan
+  ⎿  /plan to preview
+
+⏺ Updated plan
+  ⎿  /plan to preview
+  ⎿  User rejected Claude's plan:
+     ╭─────────────────────────────────────────────────────────────────────────╮
+     │ Tenpai (ready hand) detection                                           │
+     │                                                                         │
+     │ Context                                                                 │
+     │                                                                         │
+     │ The game currently deals tiles and runs turns but knows nothing about   │
+     │ hand shapes (see game.js). The user asked how to work out whether a     │
+     │ hand is ready (tenpai). This is the first rule-aware building block:    │
+     │ riichi, ron/tsumo, and exhaustive-draw noten payments all depend on it. │
+     │ This step adds pure helper functions and a small display of your own    │
+     │ waits in the UI. It adds no action validation; discards stay            │
+     │ unrestricted.                                                           │
+     │                                                                         │
+     │ Algorithm                                                               │
+     │                                                                         │
+     │ A 13-tile hand is tenpai if adding some tile kind makes a complete      │
+     │ 14-tile hand. The tiles that do this are its waits.                     │
+     │                                                                         │
+     │ 1. Counts array: map each tile to an index 0–33 (m1–9 = 0–8, p = 9–17,  │
+     │    s = 18–26, z = 27–33). A red five counts as a normal 5. The hand     │
+     │    becomes counts[34].                                                  │
+     │ 2. Try every wait: for each kind k (0–33), do counts[k]++. If           │
+     │    isComplete(counts), k is a wait. Then undo with counts[k]--.         │
+     │    - Skip k if the player already holds all 4 copies of it, because a   │
+     │      wait on your own 4th tile isn't valid tenpai under standard rules. │
+     │ 3. isComplete(counts): true if any of these three shapes matches.       │
+     │    - Standard, 4 sets + 1 pair: for each k with counts[k] >= 2, remove  │
+     │      it as the pair and call canFormSets(counts).                       │
+     │    - Chiitoitsu (seven pairs): exactly 7 kinds with count 2. Four of a  │
+     │      kind doesn't count as 2 pairs.                                     │
+     │    - Kokushi (thirteen orphans): all 13 terminal and honor kinds        │
+     │      present, with one of them doubled.                                 │
+     │ 4. canFormSets(counts) (recursive): find the lowest index i with        │
+     │    counts[i] > 0. If there is none, return true.                        │
+     │    - If counts[i] >= 3, remove a triplet and recurse, then restore it.  │
+     │    - If i is a number tile with rank ≤ 7 and counts[i+1] and            │
+     │      counts[i+2] are both at least 1, remove a sequence and recurse,    │
+     │      then restore it. Honors can't form sequences.                      │
+     │    - Otherwise return false.                                            │
+     │                                                                         │
+     │    The lowest tile must be used in some set, so only those two branches │
+     │    need trying. This makes the search complete and small: 34            │
+     │    candidates × a few dozen recursive steps, which is instant.          │
+     │ 5. Open melds (later): after k calls, the closed part has 13 − 3k tiles │
+     │    and needs 4 − k sets. canFormSets already handles any multiple of    │
+     │    3, and chiitoitsu/kokushi only apply to closed hands.                │
+     │                                                                         │
+     │ Changes                                                                 │
+     │                                                                         │
+     │ - game.js: add tileIndex(tile), toCounts(tiles), isComplete(counts),    │
+     │   getWaits(tiles) (returns the wait kinds as indices), isTenpai(tiles), │
+     │   and kindLabel(index), which labels a wait kind and reuses the honor   │
+     │   names from tileLabel. These are pure functions next to the existing   │
+     │   tile helpers.                                                         │
+     │ - ui.js: in renderSeat, for your own seat only, when the hand has 13    │
+     │   tiles (between turns), show "Tenpai: waits 3m 6m" or "Not tenpai"     │
+     │   under your hand. The server already sends your hand, so no server     │
+     │   change is needed.                                                     │
+     │ - style.css: one small .waits style.                                    │
+     │                                                                         │
+     │ Verification                                                            │
+     │                                                                         │
+     │ - Add a test-tenpai.js script run with node test-tenpai.js, using known │
+     │   hands written in the short notation 123m456p789s11z etc.              │
+     │   - 1112345678999m: nine gates, waits on all of 1m–9m                   │
+     │   - 123m456p789s1122z: waits 1z and 2z                                  │
+     │   - 11223344556677m minus one tile: a seven-pairs wait                  │
+     │   - A 13-orphans hand with a 13-sided wait                              │
+     │   - 1111m, plus four more tiles, waiting on 1m: must not count 1m       │
+     │   - A random noten hand                                                 │
+     │ - Also run checkIntegrity to confirm the helpers don't mutate the hand. │
+     │ - Then run npm start (you start it), open 4 tabs, and confirm the       │
+     │   tenpai line updates after each of your discards.                      │
+     ╰─────────────────────────────────────────────────────────────────────────╯
+
+✻ Brewed for 32s · done 5:29 PM
