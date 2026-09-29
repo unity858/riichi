@@ -4,8 +4,8 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: system-ui, sans-serif;
-  background: #1f5e3a;
-  color: #f4f4f4;
+  background: #fff;
+  color: #222;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -31,7 +31,7 @@ body {
 
 #center {
   grid-area: center;
-  background: #174a2d;
+  background: #f0f0f0;
   border-radius: 8px;
   padding: 12px;
   display: flex;
@@ -44,6 +44,7 @@ body {
 
 #info div { margin: 2px 0; }
 #info .status { font-weight: bold; font-size: 1.1em; }
+#info .breakdown { font-size: 0.9em; line-height: 1.4; }
 .hint { font-size: 0.8em; opacity: 0.7; margin: 0; }
 
 .seat {
@@ -54,14 +55,19 @@ body {
   border-radius: 8px;
   border: 2px solid transparent;
 }
-.seat.active { border-color: #ffd54a; }
+.seat.active { border-color: #e0a800; }
+.seat.winner { border-color: #d32f2f; background: #fff3f3; }
+
+button.win { font-weight: bold; background: #d32f2f; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; }
 
 .seat-name { font-size: 0.9em; font-weight: bold; }
-.seat-name .dealer { color: #ffd54a; margin-left: 4px; }
+.seat-name .dealer { color: #a86b00; margin-left: 4px; }
+.seat-name .delta.gain { color: #2e7d32; }
+.seat-name .delta.loss { color: #c62828; }
 
 .hand, .pond { display: flex; flex-wrap: wrap; gap: 3px; }
 .hand .drawn { margin-left: 12px; }
-.waits { font-size: 0.85em; color: #ffd54a; }
+.waits { font-size: 0.85em; color: #a86b00; }
 
 .pond {
   display: grid;
@@ -76,8 +82,8 @@ body {
   align-items: center;
   justify-content: center;
   background: #fbf8ee;
-  border: 1px solid #999;
-  border-bottom-width: 4px;
+  border: 2px solid #999;
+  border-bottom-width: 5px;
   border-radius: 4px;
   font-weight: bold;
   font-size: 14px;
@@ -95,4 +101,10 @@ body {
 
 .tile.clickable { cursor: pointer; }
 .tile.clickable:hover { transform: translateY(-6px); }
-.tile.last-drawn { outline: 2px solid #ffd54a; }
+.tile.last-drawn { outline: 2px solid #e0a800; }
+.tile.win-tile, .tile.claim-tile { outline: 3px solid #d32f2f; }
+.tile.dimmed { opacity: 0.35; }
+.pond .tile.riichi-tile { transform: rotate(90deg); margin: 0 5px; }
+
+.seat-name .riichi-tag { color: #1565c0; margin-left: 4px; }
+button.selected { outline: 2px solid #1565c0; }

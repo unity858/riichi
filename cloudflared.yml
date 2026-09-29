@@ -1,0 +1,10 @@
+# Cloudflare Tunnel for the game server (npm run tunnel, with npm start running).
+# One-time setup, once a domain is on your Cloudflare account:
+#   cloudflared tunnel login
+#   cloudflared tunnel create riichi
+#   cloudflared tunnel route dns riichi <hostname>
+# The tunnel's credentials are written to ~/.cloudflared/<tunnel-id>.json, where
+# cloudflared finds them by default. Keep them out of this repo.
+tunnel: riichi
+ingress:
+  - service: http://localhost:8080

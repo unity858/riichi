@@ -6,11 +6,17 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { newHand, draw, discard, checkIntegrity } from './game.js';
+import {
+  newHand, draw, discard, tsumo, claim, canTsumo, canRon, riichiDiscards, declareRiichi, autoDiscardDue,
+  furitenStatus, checkIntegrity,
+} from './game.js';
+
+// How long a riichi player's unusable draw is shown before it is discarded for them.
+const AUTO_DISCARD_MS = 1000;
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
-const STATIC = new Set(['/index.html', '/style.css', '/ui.js', '/game.js']);
+const STATIC = new Set(['/index.html', '/style.css', '/ui.js', '/game.js', '/scoring.js']);
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript' };
 
 const server = http.createServer((req, res) => {
@@ -36,9 +42,12 @@ function connectedCount() {
 }
 
 // Per-seat view: your own hand is visible, others show only a tile count.
+// When a hand ends, the winners' hands (or the tenpai hands, after a draw) are shown to everyone.
 function viewFor(seat) {
   const base = { type: 'state', you: seat, connected: seats.map(Boolean) };
   if (!state) return { ...base, game: null };
+  const revealed = state.result?.winners ?? state.result?.tenpai ?? [];
+  const visible = (p) => p.seat === seat || revealed.includes(p.seat);
   return {
     ...base,
     game: {
@@ -46,15 +55,25 @@ function viewFor(seat) {
       current: state.current,
       phase: state.phase,
       roundWind: state.roundWind,
+      scores: state.scores,
+      riichiSticks: state.riichiSticks,
       wallCount: state.wall.length,
       doraIndicators: state.doraIndicators,
+      lastDiscard: state.lastDiscard,
+      result: state.result,
+      canTsumo: seat !== null && canTsumo(state, seat),
+      canRon: seat !== null && canRon(state, seat),
+      riichiDiscards: seat !== null ? riichiDiscards(state, seat) : [],
+      autoDiscarding: seat !== null && state.current === seat && autoDiscardDue(state),
+      furiten: seat !== null ? furitenStatus(state, seat) : null, // your own only: it reveals your waits
       players: state.players.map((p) => ({
         seat: p.seat,
         discards: p.discards,
         handCount: p.hand.length,
         hasDrawn: !!p.drawn,
-        hand: p.seat === seat ? p.hand : null,
-        drawn: p.seat === seat ? p.drawn : null,
+        hand: visible(p) ? p.hand : null,
+        drawn: visible(p) ? p.drawn : null,
+        riichi: p.riichi, // { turn, discardIndex, double, ippatsu } is public knowledge
       })),
     },
   };
@@ -66,8 +85,29 @@ function broadcast() {
   });
 }
 
+// A riichi player's draw that can't be used is shown for AUTO_DISCARD_MS, then discarded
+// for them. The timer checks it is still the same hand and the same drawn tile.
+function scheduleAutoDiscard() {
+  if (!state || !autoDiscardDue(state)) return;
+  const hand = state;
+  const tileId = hand.players[hand.current].drawn.id;
+  setTimeout(() => {
+    if (state !== hand || !autoDiscardDue(hand) || hand.players[hand.current].drawn?.id !== tileId) return;
+    if (discard(hand, tileId)) draw(hand);
+    update();
+  }, AUTO_DISCARD_MS);
+}
+
+// Sends everyone the new state, then starts the auto-discard timer if it applies.
+function update() {
+  broadcast();
+  scheduleAutoDiscard();
+}
+
+// Scores and riichi sticks carry over from the previous hand; the first hand starts
+// everyone at 25000.
 function startHand() {
-  state = newHand({ dealer: state ? state.dealer : 0 });
+  state = newHand(state ? { dealer: state.dealer, scores: state.scores, riichiSticks: state.riichiSticks } : {});
   console.log('New hand dealt. Integrity:', checkIntegrity(state));
 }
 
@@ -95,11 +135,25 @@ wss.on('connection', (ws) => {
     if (ws.seat === null) return;
 
     if (msg.type === 'discard' && state && state.current === ws.seat) {
-      if (discard(state, msg.tileId)) draw(state);
-      broadcast();
+      // A riichi player's unusable draw is discarded by the timer, not by hand.
+      // No draw while other players are deciding whether to ron the discard.
+      if (!autoDiscardDue(state) && discard(state, msg.tileId)) draw(state);
+      update();
+    } else if (msg.type === 'riichi' && state) {
+      if (declareRiichi(state, ws.seat, msg.tileId)) {
+        draw(state);
+        update();
+      }
+    } else if (msg.type === 'tsumo' && state) {
+      if (tsumo(state, ws.seat)) update();
+    } else if ((msg.type === 'ron' || msg.type === 'pass') && state) {
+      if (claim(state, ws.seat, msg.type)) {
+        draw(state); // only draws if everyone passed and play continues
+        update();
+      }
     } else if (msg.type === 'newHand' && connectedCount() === 4) {
       startHand();
-      broadcast();
+      update();
     }
   });
 
