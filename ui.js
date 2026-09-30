@@ -90,11 +90,12 @@ function renderSeat(el, player, game, you) {
   name.className = 'seat-name';
   const who = player.seat === you ? 'You' : `Player ${player.seat + 1}`;
   const offline = view.connected[player.seat] ? '' : ' (offline)';
-  name.innerHTML = `${seatWind(player.seat, game.dealer)} · ${who}${offline}` +
-    (player.seat === game.dealer ? '<span class="dealer">[Dealer]</span>' : '') +
-    ` · <span class="score">${game.scores[player.seat].toLocaleString()}</span>`;
+  // The dealer's seat wind (always E) is shown in red.
+  const wind = seatWind(player.seat, game.dealer);
+  name.innerHTML = (player.seat === game.dealer ? `<span class="dealer">${wind}</span>` : wind) +
+    ` · ${who}${offline} · <span class="score">${game.scores[player.seat].toLocaleString()}</span>`;
   const delta = result?.deltas?.[player.seat];
-  if (delta) name.innerHTML += ` <span class="delta ${delta > 0 ? 'gain' : 'loss'}">${delta > 0 ? '+' : ''}${delta.toLocaleString()}</span>`;
+  if (delta) name.innerHTML += ` <span class="delta ${delta > 0 ? 'gain' : 'loss'}">(${delta > 0 ? '+' : ''}${delta.toLocaleString()})</span>`;
   if (result?.type === 'exhaustiveDraw') {
     name.innerHTML += ` · ${result.tenpai.includes(player.seat) ? 'Tenpai' : 'Noten'}`;
   }
@@ -142,11 +143,12 @@ function renderSeat(el, player, game, you) {
   pond.className = 'pond';
   // The discard that can be (or was) called ron on is highlighted.
   const target = game.lastDiscard?.tile ?? (result?.type === 'ron' ? result.tile : null);
-  // The riichi declaration tile lies sideways.
+  // The riichi declaration tile lies sideways; tsumogiri discards are a shade darker.
   player.discards.forEach((t, i) => {
     const classes = [];
     if (target && t.id === target.id) classes.push('claim-tile');
     if (player.riichi?.discardIndex === i) classes.push('riichi-tile');
+    if (player.tsumogiri[i]) classes.push('tsumogiri');
     pond.appendChild(tileEl(t, { extraClass: classes.join(' ') }));
   });
   el.appendChild(pond);
@@ -231,7 +233,7 @@ function render() {
   infoEl.innerHTML = `
     <div class="status">${statusText(game, you)}</div>
     ${breakdownHtml(game, you)}
-    <div>Round: ${WINDS[game.roundWind]} · Dealer: Player ${game.dealer + 1}</div>
+    <div>Round: ${WINDS[game.roundWind]}</div>
     <div>Wall: ${game.wallCount} tiles left</div>
     <div>Dora indicator: ${game.doraIndicators.map(tileLabel).join(' ')}</div>
     ${game.result?.uraIndicators ? `<div>Ura dora indicator: ${game.result.uraIndicators.map(tileLabel).join(' ')}</div>` : ''}

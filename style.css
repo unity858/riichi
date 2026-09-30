@@ -61,7 +61,7 @@ body {
 button.win { font-weight: bold; background: #d32f2f; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; }
 
 .seat-name { font-size: 0.9em; font-weight: bold; }
-.seat-name .dealer { color: #a86b00; margin-left: 4px; }
+.seat-name .dealer { color: #d32f2f; }
 .seat-name .delta.gain { color: #2e7d32; }
 .seat-name .delta.loss { color: #c62828; }
 
@@ -96,6 +96,10 @@ button.win { font-weight: bold; background: #d32f2f; color: #fff; border: none; 
 .tile.s { color: #2e7d32; }
 .tile.z { color: #222; }
 .tile.red { background: #ffe1e1; color: #d50000; }
+
+/* Tsumogiri discards (thrown straight after drawing) are a shade darker. */
+.pond .tile.tsumogiri { background: #e4dfcf; }
+.pond .tile.red.tsumogiri { background: #eec6c6; }
 
 .tile.back { background: #e0a030; border-color: #8a5a10; }
 

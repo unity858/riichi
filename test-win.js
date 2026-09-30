@@ -67,6 +67,16 @@ import { furitenStatus } from './game.js';
   check('unknown claim actions are rejected', !claim(s, 1, 'pon') && canRon(s, 1));
 }
 
+{
+  const s = table({ drawn: '9s' });
+  discard(s, s.players[0].drawn.id); // tsumogiri
+  draw(s);
+  discard(s, s.players[1].hand[0].id); // from the hand
+  check('discards record whether they were tsumogiri',
+    s.players[0].tsumogiri.join() === 'true' && s.players[1].tsumogiri.join() === 'false' &&
+    s.players.every((p) => p.tsumogiri.length === p.discards.length));
+}
+
 // --- Furiten ---
 {
   // Seat 1 waits on 1z/2z but has already discarded a 1z.

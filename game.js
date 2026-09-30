@@ -56,14 +56,16 @@ export function sortHand(hand) {
 }
 
 // scores and riichiSticks (unclaimed 1000-point riichi deposits) carry over from the
-// previous hand.
+// previous hand. wall replaces the random shuffle with a fixed order of all 136 tiles
+// (see seed.js for how the positions are used).
 export function newHand({
   dealer = 0,
   roundWind = 0,
   scores = [0, 1, 2, 3].map(() => STARTING_SCORE),
   riichiSticks = 0,
+  wall: fixedWall = null,
 } = {}) {
-  const wall = createWall();
+  const wall = fixedWall ? [...fixedWall] : createWall();
   // The dead wall is 7 stacks of 2: stack i is deadWall[2i] on top of deadWall[2i + 1].
   // The dora indicator is the top of the third stack; the ura dora indicator is under it.
   const deadWall = wall.splice(wall.length - 14, 14);
@@ -75,6 +77,7 @@ export function newHand({
     hand: [],
     drawn: null,
     discards: [],
+    tsumogiri: [], // per discard: true if it was the tile just drawn
     // Set on declaration: { turn, discardIndex, double, ippatsu }. turn is state.turnCount
     // when declared, discardIndex the riichi tile's index in discards.
     riichi: null,
@@ -140,7 +143,8 @@ export function discard(state, tileId) {
   }
 
   let tile;
-  if (player.drawn && player.drawn.id === tileId) {
+  const fromDraw = !!player.drawn && player.drawn.id === tileId;
+  if (fromDraw) {
     tile = player.drawn;
   } else {
     const idx = player.hand.findIndex((t) => t.id === tileId);
@@ -151,6 +155,7 @@ export function discard(state, tileId) {
   player.drawn = null;
   sortHand(player.hand);
   player.discards.push(tile);
+  player.tsumogiri.push(fromDraw);
 
   const turn = state.turnCount;
   state.turnCount++;

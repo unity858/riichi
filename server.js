@@ -8,11 +8,29 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   newHand, draw, discard, tsumo, claim, canTsumo, canRon, riichiDiscards, declareRiichi, autoDiscardDue,
-  furitenStatus, checkIntegrity,
+  furitenStatus, createWall, checkIntegrity,
 } from './game.js';
+
+import { wallFromSeed, seedFromWall } from './seed.js';
 
 // How long a riichi player's unusable draw is shown before it is discarded for them.
 const AUTO_DISCARD_MS = 1000;
+
+// Debugging: DEBUG_SEED fixes the wall order of every hand (see seed.js), given either as
+// the seed itself or as a path to a file containing it. Checked at startup.
+const SEED = (() => {
+  const value = process.env.DEBUG_SEED;
+  if (!value) return null;
+  const text = fs.existsSync(value) ? fs.readFileSync(value, 'utf8') : value;
+  try {
+    wallFromSeed(text);
+  } catch (err) {
+    console.error(`DEBUG_SEED is invalid: ${err.message}`);
+    process.exit(1);
+  }
+  console.log(`DEBUG_SEED set: every hand uses the fixed wall order${fs.existsSync(value) ? ` from ${value}` : ''}`);
+  return text;
+})();
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -69,6 +87,7 @@ function viewFor(seat) {
       players: state.players.map((p) => ({
         seat: p.seat,
         discards: p.discards,
+        tsumogiri: p.tsumogiri,
         handCount: p.hand.length,
         hasDrawn: !!p.drawn,
         hand: visible(p) ? p.hand : null,
@@ -106,9 +125,12 @@ function update() {
 
 // Scores and riichi sticks carry over from the previous hand; the first hand starts
 // everyone at 25000.
+// Every hand's full seed is logged, so any hand can be replayed with DEBUG_SEED.
 function startHand() {
-  state = newHand(state ? { dealer: state.dealer, scores: state.scores, riichiSticks: state.riichiSticks } : {});
-  console.log('New hand dealt. Integrity:', checkIntegrity(state));
+  const carried = state ? { dealer: state.dealer, scores: state.scores, riichiSticks: state.riichiSticks } : {};
+  const wall = SEED ? wallFromSeed(SEED) : createWall();
+  state = newHand({ ...carried, wall });
+  console.log(`New hand dealt. Integrity: ${checkIntegrity(state)}. Seed: ${seedFromWall(wall)}`);
 }
 
 wss.on('connection', (ws) => {
