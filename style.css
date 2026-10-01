@@ -67,18 +67,24 @@ body {
 .seat.winner { border-color: #d32f2f; background: #fff3f3; }
 
 button.win { font-weight: bold; background: #d32f2f; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; }
+/* Call and action buttons: text colours keep the normal button background. */
+button.call-pon, button.call-chii { color: #00f; }
+button.call-kan { color: #f0f; }
+#riichi { background: #ffa500; color: #000; font-weight: bold; }
+#kyuushu { color: #777; font-style: italic; }
 
 .seat-name { font-size: 0.9em; font-weight: normal; }
 .seat.active .seat-name { font-weight: bold; } /* whose turn it is */
-.seat-name.furiten { font-style: italic; } /* your own name line while you are furiten */
-.seat-name .no-yaku { color: #e07000; }
 .seat-name .dealer { color: #d32f2f; }
 .seat-name .delta.gain { color: #2e7d32; }
 .seat-name .delta.loss { color: #c62828; }
 
 .hand, .pond { display: flex; flex-wrap: wrap; gap: 3px; }
 .hand .drawn { margin-left: 12px; }
-.waits { font-size: 0.85em; color: #a86b00; }
+.waits { font-size: 0.85em; color: #a86b00; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.waits .wait { display: inline-flex; align-items: center; gap: 3px; }
+.waits .tile { width: 24px; height: 32px; font-size: 11px; border-bottom-width: 3px; }
+.waits .furiten-tag { color: orange; font-weight: bold; }
 
 .pond {
   display: grid;

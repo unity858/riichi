@@ -1,7 +1,7 @@
 // Run with: node test-win.js
 import { newHand, draw, discard, tsumo, claim, canTsumo, canRon, checkIntegrity, declareKan, chiiOptions } from './game.js';
 import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
-import { furitenStatus, yakulessTenpai } from './game.js';
+import { furitenStatus, waitYaku, kindLabel } from './game.js';
 
 {
   const s = table({ hands: { 0: '123m456p789s1122z' }, drawn: '1z' });
@@ -149,14 +149,37 @@ check('no tsumo with an open hand and no yaku', !canTsumo(openNoYaku(), 0) && !t
     s.result.scores[0].yaku.map((y) => y.name).join() === 'Rinshan kaihou');
 }
 
-// --- "(no yaku)": tenpai, but no wait would win by ron with a yaku ---
+// --- Yaku per wait (atozuke) ---
 {
+  const label = (s, seat) => waitYaku(s, seat).map((w) => `${kindLabel(w.kind)}:${w.ron ? 'ron' : w.tsumo ? 'tsumo' : 'none'}`).join(' ');
   const s = table({ hands: { 1: NO_YAKU, 2: '123m456p789s23s55m', 3: '1234567m2468p13s' } });
-  check('a yakuless tenpai hand is flagged', yakulessTenpai(s, 1));
-  check('a hand with a yaku on its waits (pinfu) is not', !yakulessTenpai(s, 2));
-  check('a hand that isn\'t tenpai is not', !yakulessTenpai(s, 3));
+  check('a closed hand with no yaku can only win its waits by tsumo', label(s, 1) === '2p:tsumo 5p:tsumo');
+  check('a pinfu hand has a yaku on every wait', label(s, 2) === '1s:ron 4s:ron');
+  check('a hand that isn\'t tenpai has no waits', waitYaku(s, 3).length === 0);
   s.players[1].riichi = { turn: -1, discardIndex: 0, double: false, ippatsu: false };
-  check('after riichi it is not (riichi is a yaku)', !yakulessTenpai(s, 1));
+  check('after riichi every wait can win by ron', label(s, 1) === '2p:ron 5p:ron');
+  // Atozuke: 234m 234p 23s 77s with an open pon of 999s waits on 1s/4s. Winning on 4s makes
+  // sanshoku doujun (234 in all three suits); winning on 1s makes nothing.
+  const o = table({ hands: { 1: '234m234p23s77s' } });
+  o.players[1].hand = parse('234m234p23s77s', 1100);
+  const pon = parse('999s', 3000);
+  o.players[1].melds.push({ type: 'pon', open: true, tiles: pon, from: 0, calledId: pon[0].id });
+  o.players[1].discards = parse('1z', 1190);
+  o.callMade = true;
+  check('atozuke: an open hand with a yaku on only one wait', label(o, 1) === '1s:none 4s:ron');
+}
+
+// Atozuke in play: the same open hand can ron the wait with a yaku, not the other.
+for (const [tile, can] of [['4s', true], ['1s', false]]) {
+  const s = table({ hands: { 1: '234m234p23s77s' }, drawn: tile });
+  s.players[1].hand = parse('234m234p23s77s', 1100);
+  const pon = parse('999s', 3000);
+  s.players[1].melds.push({ type: 'pon', open: true, tiles: pon, from: 0, calledId: pon[0].id });
+  s.players[1].discards = parse('1z', 1190);
+  s.callMade = true;
+  s.doraIndicators = [];
+  discard(s, s.players[0].drawn.id);
+  check(`atozuke: ${can ? 'ron on the 4s (sanshoku doujun)' : 'no ron on the 1s (no yaku)'}`, canRon(s, 1) === can);
 }
 
 // --- Furiten ---

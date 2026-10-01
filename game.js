@@ -333,15 +333,18 @@ function hasYaku(state, seat, tile, tsumo, opts) {
   return score.yakuman > 0 || score.han > 0;
 }
 
-// True if seat is tenpai but none of the tiles it waits on would win by ron with a yaku right
-// now (so it needs riichi, a yaku from somewhere else, or, if closed, a tsumo). Uses the hand
-// as it stands between draws; false mid-turn.
-export function yakulessTenpai(state, seat) {
+// Each tile seat waits on, and whether winning on it would have a yaku right now, by ron and
+// by tsumo: [{ kind, ron, tsumo }]. A hand may have a yaku on only some of its waits
+// (atozuke); it can win on those. Uses the hand as it stands between draws; [] mid-turn.
+export function waitYaku(state, seat) {
   const { hand } = state.players[seat];
-  if (hand.length % 3 !== 1) return false;
-  const waits = getWaits(hand);
+  if (hand.length % 3 !== 1) return [];
   const tileOf = (k) => ({ id: -1, suit: SUITS[Math.floor(k / 9)], rank: (k % 9) + 1, red: false });
-  return waits.length > 0 && waits.every((k) => !hasYaku(state, seat, tileOf(k), false));
+  return getWaits(hand).map((kind) => ({
+    kind,
+    ron: hasYaku(state, seat, tileOf(kind), false),
+    tsumo: hasYaku(state, seat, tileOf(kind), true),
+  }));
 }
 
 // Scores seat's win on tile (see scoring.js), with their melds. A tsumo on a replacement tile

@@ -2,7 +2,7 @@
 // Three screens: the lobby (name, create or join a room), the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, kindLabel, getWaits, calledTilePosition, WINDS } from './game.js';
+import { tileLabel, calledTilePosition, WINDS } from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table') };
@@ -236,6 +236,11 @@ function canClickTile(tile, player, game, you) {
   return true;
 }
 
+// A tile object for a tile kind (0-33), for showing a kind with the normal tile element.
+function tileOfKind(kind) {
+  return { id: -1, suit: 'mpsz'[Math.floor(kind / 9)], rank: (kind % 9) + 1, red: false };
+}
+
 function seatWind(seat, dealer) {
   return WINDS[(seat - dealer + 4) % 4];
 }
@@ -260,13 +265,7 @@ function renderSeat(el, player, game, you) {
 
   const name = document.createElement('div');
   name.className = 'seat-name';
-  // Your own name line is italic while you are furiten, and your name gets an orange
-  // "(no yaku)" when you are tenpai without a yaku to ron with. Both only for yourself: they
-  // would give away your waits.
-  const f = player.seat === you ? game.furiten : null;
-  name.classList.toggle('furiten', !!(f && (f.discard || f.temporary || f.riichi)));
-  const noYaku = player.seat === you && game.noYaku ? ' <span class="no-yaku">(no yaku)</span>' : '';
-  const who = player.seat === you ? `${nameOf(player.seat)} (you)${noYaku}` : nameOf(player.seat);
+  const who = player.seat === you ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
   const offline = view.room.seats[player.seat]?.connected ? '' : ' (offline)';
   // The dealer's seat wind (always E) is shown in red.
   const wind = seatWind(player.seat, game.dealer);
@@ -333,13 +332,31 @@ function renderSeat(el, player, game, you) {
   // Between your turns, show your own waits (not mid-turn, e.g. right after a chii).
   const myDiscard = game.current === you && game.phase === 'discard';
   if (player.seat === you && player.hand && !player.drawn && !won && !myDiscard) {
-    const waits = getWaits(player.hand);
+    // Each wait is shown as a tile, noting if winning on it has no yaku or only by tsumo
+    // (atozuke: a hand may have a yaku on only some of its waits). Furiten belongs to the
+    // whole hand, so a single "(furiten)" comes after all the waits.
+    const waits = game.waits;
     const line = document.createElement('div');
     line.className = 'waits';
-    const f = game.furiten;
-    const kinds = f ? ['discard', 'temporary', 'riichi'].filter((k) => f[k]) : [];
-    const furiten = kinds.length ? ` (furiten, ${kinds.join(' + ')}: tsumo only)` : '';
-    line.textContent = waits.length ? `Tenpai: waits ${waits.map(kindLabel).join(' ')}${furiten}` : 'Not tenpai';
+    if (!waits.length) {
+      line.textContent = 'Not tenpai';
+    } else {
+      line.append('Tenpai:');
+      for (const w of waits) {
+        const item = document.createElement('span');
+        item.className = 'wait';
+        item.appendChild(tileEl(tileOfKind(w.kind)));
+        if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
+        line.appendChild(item);
+      }
+      const f = game.furiten;
+      if (f && (f.discard || f.temporary || f.riichi)) {
+        const tag = document.createElement('span');
+        tag.className = 'furiten-tag';
+        tag.textContent = '(furiten)';
+        line.appendChild(tag);
+      }
+    }
     el.appendChild(line);
   }
 
@@ -505,9 +522,11 @@ function render() {
   // One Pon or Chii button per distinct pair of tiles you could reveal.
   callOptionsEl.innerHTML = '';
   const mine = game.players[you]?.hand ?? [];
+  // Each call button is styled by its kind (see .call-pon, .call-chii, .call-kan in style.css).
   const button = (text, msg) => {
     const btn = document.createElement('button');
     btn.textContent = text;
+    btn.className = `call-${msg.type}`;
     btn.addEventListener('click', () => send(msg));
     callOptionsEl.appendChild(btn);
   };

@@ -1,6 +1,6 @@
 // Run with: node test-seed.js
 import fs from 'node:fs';
-import { newHand, createWall, draw, discard, tsumo, declareRiichi, declareKyuushu, declareKan, tileLabel } from './game.js';
+import { newHand, createWall, draw, discard, tsumo, declareRiichi, declareKyuushu, declareKan, canRon, tileLabel } from './game.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
 import { passClaims, check, done } from './test-helpers.js';
 
@@ -157,6 +157,24 @@ for (const riichi of [false, true]) {
   check('seeds/nagashi.txt: exhaustive draw with nagashi mangan for East, 4000 all, East revealed',
     s.result?.type === 'exhaustiveDraw' && s.result.nagashi.join() === '0' &&
     s.result.deltas.join() === '12000,-4000,-4000,-4000' && s.result.revealed.join() === '0');
+}
+
+{
+  // seeds/sanankou-tsumo.txt: 1113335577m 123s can't ron the 5m South throws, but tsumos the 7m.
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/sanankou-tsumo.txt', 'utf8')) });
+  discard(s, s.players[0].drawn.id);
+  draw(s);
+  discard(s, s.players[1].drawn.id); // the 5m
+  const ronOffered = canRon(s, 0);
+  passClaims(s);
+  for (let i = 0; i < 2; i++) {
+    draw(s);
+    discard(s, s.players[s.current].drawn.id);
+  }
+  draw(s);
+  const sc = tsumo(s, 0) ? s.result.scores[0] : null;
+  check('seeds/sanankou-tsumo.txt: no ron on the 5m, then tsumo on the 7m for sanankou, 2600 all',
+    !ronOffered && yakuNames(sc) === 'Menzen tsumo, Sanankou' && sc.payment.all === 2600);
 }
 
 done();

@@ -1,0 +1,34 @@
+# Conditional sanankou: 111m 333m 55m 77m 123s waits on 5m/7m, and can only win by tsumo.
+#   A triplet completed by ron counts as open, so a ron leaves only two concealed triplets (no
+#   sanankou, and no other yaku); a tsumo keeps all three concealed (sanankou + menzen tsumo).
+#   Tab 1 (East, dealer): you are dealt 1113335577m 123s and draw a 9p. Discard the 9p (don't
+#     riichi: riichi would be a yaku to ron with). Your waits show 5m and 7m as "(tsumo only)".
+#   Tab 2 (South): press Space: you discard a 5m. East is NOT offered Ron, only Pon (East has
+#     55m): press Skip in tab 1. East is now furiten too: letting a wait pass counts, yaku or not.
+#   Tabs 3-4: press Space.
+#   Tab 1 draws the 7m: press Tsumo.
+#   Expect: Menzen tsumo 1 + Sanankou 2 = 3 han 40 fu, 2,600 from each player.
+# Run: DEBUG_SEED=seeds/sanankou-tsumo.txt npm start
+#
+# Hands: East 1m1m1m3m3m3m5m5m7m7m1s2s3s, South 7z3z5s2s4s5z7z7m1z8p4s9s8p,
+#        West 9p6z2z6z9m2p1z8m6s3s4p7z5s, North 5p4p9p2m3z4m5p3m0s0p4z3z1s
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m1m1m3m  7z3z5s2s  9p6z2z6z  5p4p9p2m
+# deal round 2: East, South, West, North (positions 16-31)
+3m3m5m5m  4s5z7z7m  9m2p1z8m  3z4m5p3m
+# deal round 3: East, South, West, North (positions 32-47)
+7m7m1s2s  1z8p4s9s  6s3s4p7z  0s0p4z3z
+# one more each: East, South, West, North (48-51)
+3s8p5s1s
+# East's first draw (52): a useless 9p
+9p
+# next draws: South, West, North, East (53-56): South draws the 5m (East can't ron it), two more, then East draws the winning 7m
+5m7s8m7m
+# rest of the live wall (57-121)
+7s1m8m9p5z6s2z1s1z6z4z1s5z1z2m3p6z9s7s5z7p1p4p2m3p7z7s6s4s2p2m8s8s
+8s7p6s6m3s9m7p6m1p5s8m8s2p3p4s7p8p6p1p2z4p9s4m1p4m9s9m3p2s8p9m3z
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 4z
+3s2z6m5p
+4z4z
+6p6m6p2p4m6p2s0m
