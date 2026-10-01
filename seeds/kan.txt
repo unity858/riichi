@@ -1,0 +1,31 @@
+# Kan: a closed kan on the first draw, then rinshan kaihou on the replacement tile.
+#   Tab 1 (East, dealer): you are dealt 111m 456p 789s 23s 55m and draw the fourth 1m.
+#     Press "Kan 1m": the meld shows face down at both ends, a new dora indicator (9p)
+#     appears at once, and you draw the replacement tile, a 4s. Press Tsumo.
+#   Expect: Rinshan kaihou 1 + Menzen tsumo 1 = 2 han 60 fu (the closed kan of terminals is
+#   32 fu), 2,000 from each player. Not tenhou: the kan interrupted the first go-around.
+#   (Indicators: North and 9p, so no dora.)
+# Run: DEBUG_SEED=seeds/kan.txt npm start
+#
+# Hands: East 1m1m1m4p5p6p7s8s9s2s3s5m5m, South 6s1s6s4p6p4p8s7s1z2z5m2p0m,
+#        West 1z8m3p4z7m3p7m9p1z6m4p7p2z, North 4m3s4m4s5s7m3p7z6m1z8m6p3z
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m1m1m4p  6s1s6s4p  1z8m3p4z  4m3s4m4s
+# deal round 2: East, South, West, North (positions 16-31)
+5p6p7s8s  6p4p8s7s  7m3p7m9p  5s7m3p7z
+# deal round 3: East, South, West, North (positions 32-47)
+9s2s3s5m  1z2z5m2p  1z6m4p7p  6m1z8m6p
+# one more each: East, South, West, North (48-51)
+5m0m2z3z
+# East's first draw (52): the fourth 1m
+1m
+# next draws: South, West, North, East (53-56)
+7s6p5z2m
+# rest of the live wall (57-121)
+7s3z4m8p3m4s8p2z2s4z2z2p7z9s7p6z7m3m1p8p5p2m6m1s3s1p3m9m2s9s3s5p8s
+8m6m3z2m1p7z9p3p5s3z0s8p9m1s7z2p1p6z1s6s0p9s8m6z9m2m7p2s5s5z5z4m
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 4z
+4s5z2p4s
+4z4z
+9p9p6s6z9m3m7p8s

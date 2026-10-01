@@ -1,6 +1,6 @@
 // Run with: node test-seed.js
 import fs from 'node:fs';
-import { newHand, createWall, draw, discard, tsumo, declareRiichi, tileLabel } from './game.js';
+import { newHand, createWall, draw, discard, tsumo, declareRiichi, declareKyuushu, declareKan, tileLabel } from './game.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
 import { passClaims, check, done } from './test-helpers.js';
 
@@ -101,6 +101,60 @@ const yakuNames = (sc) => sc?.yaku.map((y) => y.name).sort().join(', ');
   const withRiichi = playSeed('seeds/chiitoi-turn2.txt', { firstDiscard: '3p', riichi: true });
   check('seeds/chiitoi-turn2.txt with riichi: double riichi + ippatsu haneman, 6000 all',
     withRiichi?.limit === 'Haneman' && withRiichi.han === 7 && withRiichi.payment.all === 6000);
+}
+{
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/kyuushu.txt', 'utf8')) });
+  check('seeds/kyuushu.txt: the dealer can declare kyuushu kyuuhai on the first draw',
+    declareKyuushu(s, 0) && s.result.reason === 'kyuushu kyuuhai');
+}
+{
+  // Each player in turn declares riichi with the honor they drew.
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/suucha-riichi.txt', 'utf8')) });
+  for (let i = 0; i < 4 && s.phase !== 'ended'; i++) {
+    declareRiichi(s, s.current, s.players[s.current].drawn.id);
+    draw(s);
+  }
+  check('seeds/suucha-riichi.txt: the fourth riichi ends the hand with 4 sticks on the table',
+    s.result?.reason === 'suucha riichi' && s.riichiSticks === 4);
+}
+
+{
+  // Closed kan on the first draw, then a tsumo on the replacement tile.
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/kan.txt', 'utf8')) });
+  declareKan(s, 0, 0);
+  const sc = tsumo(s, 0) ? s.result.scores[0] : null;
+  check('seeds/kan.txt: closed kan, then rinshan kaihou + menzen tsumo, 2 han 60 fu, 2000 all',
+    yakuNames(sc) === 'Menzen tsumo, Rinshan kaihou' && sc.han === 2 && sc.fu === 60 && sc.payment.all === 2000);
+}
+
+// seeds/kan-manual.txt: closed kan of Chun on the first draw, a useless replacement tile,
+// then the winning 4s on the next turn, with or without riichi on the replacement.
+for (const riichi of [false, true]) {
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/kan-manual.txt', 'utf8')) });
+  declareKan(s, 0, 33);
+  const replacement = s.players[0].drawn.id;
+  if (riichi) declareRiichi(s, 0, replacement); else discard(s, replacement);
+  for (let i = 0; i < 3 && s.phase === 'draw'; i++) {
+    draw(s);
+    discard(s, s.players[s.current].drawn.id);
+  }
+  draw(s);
+  const sc = tsumo(s, 0) ? s.result.scores[0] : null;
+  check(`seeds/kan-manual.txt ${riichi ? 'with riichi: sanbaiman, 12000 all' : 'without riichi: haneman, 6000 all'}`,
+    riichi ? sc?.limit === 'Sanbaiman' && sc.payment.all === 12000 : sc?.limit === 'Haneman' && sc.payment.all === 6000);
+}
+
+{
+  // seeds/nagashi.txt: everyone discards their draw (passing on any call) to the end.
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/nagashi.txt', 'utf8')) });
+  for (let steps = 0; s.phase !== 'ended' && steps < 500; steps++) {
+    if (s.phase === 'discard') discard(s, s.players[s.current].drawn.id);
+    passClaims(s);
+    draw(s);
+  }
+  check('seeds/nagashi.txt: exhaustive draw with nagashi mangan for East, 4000 all, East revealed',
+    s.result?.type === 'exhaustiveDraw' && s.result.nagashi.join() === '0' &&
+    s.result.deltas.join() === '12000,-4000,-4000,-4000' && s.result.revealed.join() === '0');
 }
 
 done();

@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
+  canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions,
   autoDiscardDue, furitenStatus, createWall, checkIntegrity,
 } from './game.js';
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
@@ -91,10 +92,11 @@ function hostSeat(room) {
 }
 
 // Per-seat game view: your own hand is visible, others show only a tile count. When a hand
-// ends, the winners' hands (or the tenpai hands, after a draw) are shown to everyone.
+// ends, the winners' hands are shown to everyone; after a draw, the result lists them
+// (tenpai players and nagashi mangan winners after an exhaustive draw).
 function gameView(state, seat) {
   if (!state) return null;
-  const revealed = state.result?.winners ?? state.result?.tenpai ?? [];
+  const revealed = state.result?.winners ?? state.result?.revealed ?? [];
   const visible = (p) => p.seat === seat || revealed.includes(p.seat);
   const me = seat !== null && seat >= 0 ? seat : null;
   return {
@@ -111,8 +113,11 @@ function gameView(state, seat) {
     result: state.result,
     canTsumo: me !== null && canTsumo(state, me),
     canRon: me !== null && canRon(state, me),
+    canKyuushu: me !== null && canKyuushu(state, me),
     ponOptions: me !== null ? ponOptions(state, me) : [], // pairs of your own tile ids
     chiiOptions: me !== null ? chiiOptions(state, me) : [],
+    openKanOptions: me !== null ? openKanOptions(state, me) : [], // the three tile ids, on a discard
+    kanOptions: me !== null ? kanOptions(state, me) : [], // closed or added kans on your own turn
     riichiDiscards: me !== null ? riichiDiscards(state, me) : [],
     autoDiscarding: me !== null && state.current === me && autoDiscardDue(state),
     furiten: me !== null ? furitenStatus(state, me) : null, // your own only: it reveals your waits
@@ -334,9 +339,14 @@ function handle(ws, msg) {
       drawAfterPause(room);
       update(room);
     }
+  } else if (msg.type === 'kan' && state.phase !== 'claim') {
+    // A closed or added kan on your own turn. Others may get to rob it before the replacement draw.
+    if (declareKan(state, seat, msg.kind)) update(room);
+  } else if (msg.type === 'kyuushu') {
+    if (declareKyuushu(state, seat)) update(room);
   } else if (msg.type === 'tsumo') {
     if (tsumo(state, seat)) update(room);
-  } else if (['ron', 'pon', 'chii', 'pass'].includes(msg.type)) {
+  } else if (['ron', 'kan', 'pon', 'chii', 'pass'].includes(msg.type)) {
     if (claim(state, seat, msg.type, Array.isArray(msg.tiles) ? msg.tiles : null)) {
       // If everyone passed, the next player draws now: the decisions already took time.
       // Nothing is drawn after a call.

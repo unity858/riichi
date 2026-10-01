@@ -11,7 +11,11 @@
 //   48-51    one more tile each, dealer first
 //   52       the dealer's first draw
 //   53-121   the remaining draws in turn order (53 is the seat after the dealer)
-//   122-135  the dead wall: 126 is the dora indicator, 127 the ura dora indicator
+//   122-135  the dead wall:
+//              122-125  replacement tiles drawn after a kan, in that order
+//              126, 127 the dora indicator and the ura dora indicator
+//              128/129, 130/131, 132/133, 134/135  the indicator (and ura) each kan reveals
+//            Each kan also moves the last live-wall tile (121, then 120, ...) to the dead wall.
 
 import { createTiles, shuffle } from './game.js';
 

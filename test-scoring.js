@@ -103,6 +103,21 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
     s.result.deltas.reduce((a, b) => a + b) === 0);
 }
 
+{
+  // Seat 0 (the dealer) has an open pon and threw only terminals and honors; seat 2 is tenpai.
+  const s = table({ hands: { 2: TENPAI }, drawn: '9s', wall: 0 });
+  s.players[0].melds.push({ type: 'pon', open: true, tiles: parse('555p', 3000), from: 3, calledId: 3000 });
+  s.players[0].discards = parse('19m1z', 1950);
+  discard(s, s.players[0].drawn.id);
+  check('nagashi mangan with an open hand', s.result.nagashi.join() === '0' && s.result.deltas.join() === '12000,-4000,-4000,-4000');
+  check('the nagashi winner and the tenpai players reveal their hands', s.result.revealed.join() === '0,2' && s.result.tenpai.join() === '2');
+}
+
+{
+  const s = drawWith({ 1: TENPAI });
+  check('without nagashi only tenpai hands are revealed', s.result.revealed.join() === '1');
+}
+
 // --- Wins pay out ---
 // Seat 0 is the East dealer in the East round: 111z is both seat and round wind.
 

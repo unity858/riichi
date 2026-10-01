@@ -1,0 +1,29 @@
+# Kyuushu kyuuhai (nine terminals and honors): an abortive draw on the first draw.
+#   Tab 1 (East, dealer): you are dealt 1m 9m 1p 9p 1s 9s E S W N plus 5p 6p 8p, and draw a 2m:
+#     10 different terminals and honors. Press "Abortive draw (9 terminals)".
+#   Expect: the hand ends with no payments, your hand is shown, and the next hand is
+#   East 1 again (the dealer repeats) with 1 honba.
+# Run: DEBUG_SEED=seeds/kyuushu.txt npm start
+#
+# Hands: East 1m9m1p9p1s9s1z2z3z4z5p6p8p, South 6s2m8p7z2m6z9p9p2p7m1m6z3p,
+#        West 2s9s4p2p4m2p5m8p8m7p5p7s3m, North 0s8m4z7z6p8s1p3z7m5m5s0m8s
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m9m1p9p  6s2m8p7z  2s9s4p2p  0s8m4z7z
+# deal round 2: East, South, West, North (positions 16-31)
+1s9s1z2z  2m6z9p9p  4m2p5m8p  6p8s1p3z
+# deal round 3: East, South, West, North (positions 32-47)
+3z4z5p6p  2p7m1m6z  8m7p5p7s  7m5m5s0m
+# one more each: East, South, West, North (48-51)
+8p3p3m8s
+# East's first draw (52): 2m
+2m
+# next draws: South, West, North, East (53-56)
+3s4p7p9m
+# rest of the live wall (57-121)
+6m5z8m3s7z6m6z2p8s8p3z3s3p1m1z5z4z8s1z7z4m3s1s3m1p9s7s8m2z4s6m1z7m
+3z7s6s7s4s5z2s5z1p2s9m4s1m6p4p6s6z1s0p6m3p9p3p2m4z5s5p4m9s6p4s3m
+# dead wall (122-135): 126 = dora indicator 5s, 127 = ura indicator 9m
+6s4m7m2z
+5s9m
+1s2z3m2s7p4p7p5m

@@ -1,0 +1,31 @@
+# Suucha riichi (four riichi): an abortive draw when the fourth riichi stands.
+#   Every player starts tenpai and draws a lone honor (E, S, W, N in turn).
+#   In each tab in turn (East, South, West, North): press Riichi, then click the honor you
+#     just drew. Nobody can ron or call any of them.
+#   Expect: after North's riichi the hand ends as an abortive draw with all hands shown.
+#   Each player paid 1000 for riichi, so the scores are 24,000 each with 4 riichi sticks
+#   on the table, and the next hand is East 1 again (the dealer repeats) with 1 honba.
+# Run: DEBUG_SEED=seeds/suucha-riichi.txt npm start
+#
+# Hands: East 1m2m3m4p5p6p7s8s9s2s3s5m5m, South 2m3m4m5p6p7p3s4s5s6s6s7p8p,
+#        West 3m4m5m6p7p8p4s5s6s7m7m1s2s, North 6m7m8m2p3p4p5s6s7s9p9p2m3m
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m2m3m4p  2m3m4m5p  3m4m5m6p  6m7m8m2p
+# deal round 2: East, South, West, North (positions 16-31)
+5p6p7s8s  6p7p3s4s  7p8p4s5s  3p4p5s6s
+# deal round 3: East, South, West, North (positions 32-47)
+9s2s3s5m  5s6s6s7p  6s7m7m1s  7s9p9p2m
+# one more each: East, South, West, North (48-51)
+5m8p2s3m
+# East's first draw (52): E
+1z
+# next draws: South, West, North, East (53-56): S, W, N for the other three, then East's next draw
+2z3z4z1m
+# rest of the live wall (57-121)
+5z9s7p8p0p7s8p1m1p6z2s8m1z8s3p8m5z2m6m8s5z1s3z5p4p4z3s0s6m1s8m3p1p
+6p2z2z0m6z3z9p1z9s7z7m1m2z1p1p2p2s4m6z9m6z9m2p1s9p2p4p8s4z9s9m3z
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 7z
+6m4s5z3s
+4z7z
+7z9m7z7s3p1z4s4m

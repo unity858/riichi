@@ -59,9 +59,9 @@ export function ranking(match) {
 }
 
 // Records a finished hand (state from game.js, with state.result set) and moves the match on:
-//   - The dealer repeats after winning (even as one of several ron winners) or being tenpai
-//     at an exhaustive draw; otherwise the deal passes to the next seat, and after four
-//     deals the round wind advances.
+//   - The dealer repeats after winning (even as one of several ron winners), being tenpai
+//     at an exhaustive draw, or an abortive draw; otherwise the deal passes to the next seat,
+//     and after four deals the round wind advances.
 //   - Honba go up by one on a dealer repeat and on every exhaustive draw (even when the
 //     dealer was noten and the deal passes), and reset to 0 when a non-dealer wins.
 //   - The match ends when someone is below 0 (bust), or at the end of the last hand: after
@@ -72,8 +72,10 @@ export function recordHand(match, state) {
   const result = state.result;
   match.scores = [...state.scores];
   match.riichiSticks = state.riichiSticks;
-  const draw = result.type === 'exhaustiveDraw';
-  const dealerRepeats = draw ? result.tenpai.includes(match.dealer) : result.winners.includes(match.dealer);
+  // An abortive draw counts as a draw where the dealer repeats.
+  const aborted = result.type === 'abortiveDraw';
+  const draw = result.type === 'exhaustiveDraw' || aborted;
+  const dealerRepeats = aborted || (draw ? result.tenpai.includes(match.dealer) : result.winners.includes(match.dealer));
   match.history.push({ label: handLabel(match), honba: match.honba, type: result.type, winners: result.winners ?? [], deltas: result.deltas });
   match.honba = dealerRepeats || draw ? match.honba + 1 : 0;
 

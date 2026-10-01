@@ -1,0 +1,35 @@
+# Kan, played out by hand: tenpai with a closed Chun triplet, and the first draw is the fourth Chun.
+#   Tab 1 (East, dealer): you are dealt 777z 456p 789s 23s 55m (tenpai on 1s/4s) and draw a 7z.
+#     Press "Kan R": a closed kan (face down at both ends). The new dora indicator is a Hatsu (G),
+#     so your four Chun are dora, and it is revealed at once. The replacement tile is a 9m.
+#     Then either discard the 9m, or press Riichi and click the 9m (not a double riichi: the
+#     kan interrupted the first go-around).
+#   Tabs 2-4: press Space to discard each draw. Nobody can call anything.
+#   Tab 1 draws the winning 4s: press Tsumo.
+#   Expect without riichi: Yakuhai Chun 1 + Menzen tsumo 1 + Dora 4 = 6 han, haneman, 6,000 all.
+#   Expect with riichi: also Riichi 1 + Ippatsu 1 + Ura dora 4 (the ura under the Hatsu is a
+#   Hatsu too) = 12 han, sanbaiman, 12,000 all.
+# Run: DEBUG_SEED=seeds/kan-manual.txt npm start
+#
+# Hands: East 7z7z7z4p5p6p7s8s9s2s3s5m5m, South 7p2p2z4m1z9s4m4s6z3z7m1s1p,
+#        West 1m1m4p6s2z7p3z7m4m9p9m7p9s, North 5s3s9m2m8m4z0m0p6p5p1m3z4m
+
+# deal round 1: East, South, West, North (positions 0-15)
+7z7z7z4p  7p2p2z4m  1m1m4p6s  5s3s9m2m
+# deal round 2: East, South, West, North (positions 16-31)
+5p6p7s8s  1z9s4m4s  2z7p3z7m  8m4z0m0p
+# deal round 3: East, South, West, North (positions 32-47)
+9s2s3s5m  6z3z7m1s  4m9p9m7p  6p5p1m3z
+# one more each: East, South, West, North (48-51)
+5m1p9s4m
+# East's first draw (52): the fourth Chun
+7z
+# next draws: South, West, North, East (53-56): three tiles nobody can call, then East draws the winning 4s
+3m8s1z4s
+# rest of the live wall (57-121)
+6z3s8s3s3m3m2p6s5s2m8s6p5s3p7s9p3p8m2p1m6m2m4p5z8p8p2s2z6s1s7s1z4s
+7m1s1p4z5z4s2z2m8p1z9p8p6m5z9s1p8m5m6s2s2p3p9p1p7m6p3z5z3p3m4p9m
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 4z
+9m2s6m6m
+4z4z
+6z6z7s0s5p7p8m1s

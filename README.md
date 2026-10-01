@@ -40,7 +40,11 @@ Positions (seats counted from the dealer):
 | 48-51 | one more tile each, dealer first |
 | 52 | the dealer's first draw |
 | 53-121 | the remaining draws in turn order |
-| 122-135 | dead wall: 126 is the dora indicator, 127 the ura dora indicator |
+| 122-125 | dead wall: replacement tiles drawn after a kan, in order |
+| 126, 127 | dead wall: the dora indicator, and the ura dora indicator under it |
+| 128-135 | dead wall: the indicator and ura indicator each kan reveals (128/129 for the first kan, then 130/131, ...) |
+
+Each kan also moves the last live-wall tile to the dead wall, so the live wall ends one tile earlier per kan.
 
 The server logs every hand's full seed (`Seed: ...`), including random games, so any hand can be replayed. See `seeds/` for examples.
 

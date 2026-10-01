@@ -1,6 +1,6 @@
 // Run with: node test-riichi.js
 import {
-  newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, canRiichi, declareRiichi,
+  newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, openKanOptions, kanOptions, declareKan, riichiDiscards, canRiichi, declareRiichi,
   autoDiscardDue, checkIntegrity,
 } from './game.js';
 import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
@@ -133,6 +133,7 @@ let sticks = 0;
 let riichis = 0;
 let chiis = 0;
 let ponCalls = 0;
+let kanCalls = 0;
 let ok = true;
 for (let i = 0; i < 300; i++) {
   const s = newHand(scores ? { scores, riichiSticks: sticks } : {});
@@ -141,8 +142,12 @@ for (let i = 0; i < 300; i++) {
       const seat = s.current;
       const me = s.players[seat];
       if (tsumo(s, seat)) break;
+      const kans = kanOptions(s, seat);
       const options = riichiDiscards(s, seat);
-      if (options.length) {
+      if (kans.length && Math.random() < 0.5) {
+        declareKan(s, seat, kans[0].kind); // may open a chankan window
+        kanCalls++;
+      } else if (options.length) {
         declareRiichi(s, seat, options[0]);
         riichis++;
       } else if (me.riichi) {
@@ -156,8 +161,12 @@ for (let i = 0; i < 300; i++) {
         const seat = Number(key);
         const pairs = chiiOptions(s, seat);
         const pons = ponOptions(s, seat);
+        const openKans = openKanOptions(s, seat);
         if (canRon(s, seat)) claim(s, seat, 'ron');
-        else if (pons.length && Math.random() < 0.25) {
+        else if (openKans.length && Math.random() < 0.5) {
+          claim(s, seat, 'kan', openKans[0]);
+          kanCalls++;
+        } else if (pons.length && Math.random() < 0.25) {
           claim(s, seat, 'pon', pons[Math.floor(Math.random() * pons.length)]);
           ponCalls++;
         } else if (pairs.length && Math.random() < 0.25) {
@@ -173,7 +182,7 @@ for (let i = 0; i < 300; i++) {
   scores = s.scores;
   sticks = s.riichiSticks;
 }
-check(`300 chained random hands with riichi, pon and chii keep points + sticks at 100000 (${riichis} riichi, ${ponCalls} pon, ${chiis} chii)`,
-  ok && chiis > 0 && ponCalls > 0); // riichi has its own tests; here it is just counted
+check(`300 chained random hands with riichi and calls keep points + sticks at 100000 and every tile accounted for (${riichis} riichi, ${ponCalls} pon, ${chiis} chii, ${kanCalls} kan)`,
+  ok && chiis > 0 && ponCalls > 0 && kanCalls > 0); // riichi has its own tests; here it is just counted
 
 done();

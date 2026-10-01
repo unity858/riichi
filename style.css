@@ -29,8 +29,16 @@ body {
 .seat-right  { grid-area: right; }
 .seat-bottom { grid-area: bottom; }
 
-#center {
+/* The middle of the table: the gray info box, with the dora panel under it. */
+#middle {
   grid-area: center;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#center {
+  flex: 1;
   background: #f0f0f0;
   border-radius: 8px;
   padding: 12px;
@@ -147,3 +155,18 @@ button.selected { outline: 2px solid #1565c0; }
 .final { background: #fff; border: 2px solid #e0a800; border-radius: 8px; padding: 8px 12px; margin-bottom: 8px; }
 .final table { margin: 6px auto 0; border-collapse: collapse; }
 .final td, .final th { padding: 2px 10px; }
+
+/* Dora panel: 5 slots per row (the first indicator plus one per possible kan). */
+#dora-panel {
+  background: #f0f0f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: center;
+}
+.dora-label { font-weight: bold; font-size: 0.9em; text-align: right; }
+.dora-row { display: flex; gap: 3px; }
+.dora-row .tile { width: 28px; height: 38px; font-size: 12px; }

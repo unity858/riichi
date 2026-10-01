@@ -12,6 +12,7 @@ const rematchBtn = $('rematch');
 const leaveTableBtn = $('leave-table');
 const riichiBtn = document.getElementById('riichi');
 const tsumoBtn = document.getElementById('tsumo');
+const kyuushuBtn = $('kyuushu');
 const ronBtn = document.getElementById('ron');
 const passBtn = document.getElementById('pass');
 const callOptionsEl = document.getElementById('call-options');
@@ -227,6 +228,7 @@ function renderSeat(el, player, game, you) {
   if (delta) name.innerHTML += ` <span class="delta ${delta > 0 ? 'gain' : 'loss'}">(${delta > 0 ? '+' : ''}${delta.toLocaleString()})</span>`;
   if (result?.type === 'exhaustiveDraw') {
     name.innerHTML += ` · ${result.tenpai.includes(player.seat) ? 'Tenpai' : 'Noten'}`;
+    if (result.nagashi.includes(player.seat)) name.innerHTML += ' · <span class="riichi-tag">Nagashi mangan</span>';
   }
   if (player.riichi) {
     name.innerHTML += ` <span class="riichi-tag">${player.riichi.double ? 'Double riichi' : 'Riichi'}` +
@@ -261,10 +263,19 @@ function renderSeat(el, player, game, you) {
     for (const meld of player.melds) {
       const group = document.createElement('div');
       group.className = 'meld';
-      // The called tile goes on the side it came from.
-      const [called, ...own] = meld.tiles;
-      own.splice(calledTilePosition(meld, player.seat), 0, called);
-      own.forEach((t) => group.appendChild(tileEl(t, { extraClass: t.id === meld.calledId ? 'called' : '' })));
+      if (meld.kanType === 'ankan') {
+        // A closed kan shows its two end tiles face down.
+        meld.tiles.forEach((t, i) => group.appendChild(i === 0 || i === 3 ? tileEl(null) : tileEl(t)));
+      } else {
+        // The called tile goes on the side it came from; an added kan's tile lies beside it.
+        const [called, ...rest] = meld.tiles;
+        const own = rest.filter((t) => t.id !== meld.addedId);
+        const shown = [...own];
+        shown.splice(calledTilePosition(meld, player.seat), 0, called);
+        const added = rest.find((t) => t.id === meld.addedId);
+        if (added) shown.splice(shown.indexOf(called) + 1, 0, added);
+        shown.forEach((t) => group.appendChild(tileEl(t, { extraClass: t.id === meld.calledId || t.id === meld.addedId ? 'called' : '' })));
+      }
       melds.appendChild(group);
     }
     hand.appendChild(melds);
@@ -330,6 +341,12 @@ function breakdownHtml(game, you) {
 
 function statusText(game, you) {
   const { result } = game;
+  if (result?.type === 'abortiveDraw') {
+    if (result.reason === 'suucha riichi') return 'Abortive draw: all four players declared riichi';
+    if (result.reason === 'suukaikan') return 'Abortive draw: four kans by more than one player';
+    const [seat] = result.revealed;
+    return `Abortive draw: ${seat === you ? 'you' : playerName(seat, game)} declared nine terminals and honors`;
+  }
   if (result?.type === 'exhaustiveDraw' && result.nagashi.length > 0) {
     const names = result.nagashi.map((s) => (s === you ? 'You' : playerName(s, game)));
     return `Exhaustive draw: nagashi mangan for ${names.join(' and ')}`;
@@ -349,19 +366,23 @@ function statusText(game, you) {
     const names = result.winners.map((s) => (s === you ? 'You' : playerName(s, game)));
     const verb = result.winners.length === 1 && result.winners[0] !== you ? 'wins' : 'win';
     const from = result.from === you ? 'you' : playerName(result.from, game);
-    return `${names.join(' and ')} ${verb} by ron on ${tileLabel(result.tile)} from ${from}`;
+    return `${names.join(' and ')} ${verb} by ron${result.chankan ? ' (robbing a kan)' : ''} on ${tileLabel(result.tile)} from ${from}`;
   }
   // The pause after a discard nobody can call looks the same as others deciding on a call.
   if (game.phase === 'draw') return 'Waiting for other players';
   if (game.phase === 'claim') {
     const tile = tileLabel(game.lastDiscard.tile);
-    const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.chiiOptions.length && 'chii'].filter(Boolean);
+    if (game.lastDiscard.chankan) return game.canRon ? `You can rob the kan: ron on ${tile}` : 'Waiting for other players';
+    const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.openKanOptions.length && 'kan', game.chiiOptions.length && 'chii'].filter(Boolean);
     if (can.length) return `You can ${can.join(' or ')} on ${tile}`;
     return 'Waiting for other players';
   }
   if (game.current === you && choosingRiichi) return 'Riichi: choose a tile to discard';
   if (game.current === you && game.autoDiscarding) return 'Riichi: discarding…';
-  if (game.current === you && game.players[you].riichi) return 'Riichi: tsumo, or click the drawn tile to pass';
+  if (game.current === you && game.players[you].riichi) {
+    const options = [game.canTsumo && 'tsumo', game.kanOptions.length && 'kan'].filter(Boolean).join(' or ');
+    return `Riichi: ${options}, or click the drawn tile to pass`;
+  }
   if (game.current === you) return game.canTsumo ? 'Your turn: tsumo or discard' : 'Your turn: discard a tile';
   return `Waiting for ${playerName(game.current, game)}`;
 }
@@ -376,6 +397,18 @@ function finalHtml(match, you) {
   };
   return `<div class="final"><div class="status">Match over</div><div>${reasons[match.final.reason] ?? ''}</div>` +
     `<table><tr><th>Place</th><th>Player</th><th>Score</th></tr>${rows}</table></div>`;
+}
+
+// Five slots per row: the first indicator plus one for each possible kan. Revealed dora
+// indicators are face up; ura dora stay face down unless a riichi hand won this hand.
+const INDICATOR_SLOTS = 5;
+function renderDora(game) {
+  const fill = (row, tiles) => {
+    row.innerHTML = '';
+    for (let i = 0; i < INDICATOR_SLOTS; i++) row.appendChild(tileEl(tiles[i] ?? null));
+  };
+  fill($('dora-row'), game.doraIndicators);
+  fill($('ura-row'), game.result?.uraIndicators ?? []);
 }
 
 function render() {
@@ -394,6 +427,7 @@ function render() {
     renderSeat(seatEls[POSITIONS[(p.seat - pov + 4) % 4]], p, game, you);
   });
 
+  renderDora(game);
   const offline = room.seats.filter((p) => !p.connected).length;
   infoEl.innerHTML = `
     ${match.over ? finalHtml(match, you) : ''}
@@ -401,8 +435,6 @@ function render() {
     ${breakdownHtml(game, you)}
     <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
     <div>Wall: ${game.wallCount} tiles left</div>
-    <div>Dora indicator: ${game.doraIndicators.map(tileLabel).join(' ')}</div>
-    ${game.result?.uraIndicators ? `<div>Ura dora indicator: ${game.result.uraIndicators.map(tileLabel).join(' ')}</div>` : ''}
     ${game.riichiSticks ? `<div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>` : ''}
     ${game.result?.honbaBonus ? `<div>Honba: +${game.result.honbaBonus.toLocaleString()}</div>` : ''}
     ${you === null ? '<div>Watching</div>' : ''}
@@ -416,20 +448,30 @@ function render() {
   riichiBtn.hidden = !game.riichiDiscards.length;
   riichiBtn.classList.toggle('selected', choosingRiichi);
   tsumoBtn.hidden = !game.canTsumo;
+  kyuushuBtn.hidden = !game.canKyuushu;
   ronBtn.hidden = !game.canRon;
-  passBtn.hidden = !game.canRon && !game.ponOptions.length && !game.chiiOptions.length;
+  passBtn.hidden = !game.canRon && !game.ponOptions.length && !game.openKanOptions.length && !game.chiiOptions.length;
 
   // One Pon or Chii button per distinct pair of tiles you could reveal.
   callOptionsEl.innerHTML = '';
   const mine = game.players[you]?.hand ?? [];
-  for (const [type, label] of [['pon', 'Pon'], ['chii', 'Chii']]) {
-    for (const pair of game[`${type}Options`]) {
+  const button = (text, msg) => {
+    const btn = document.createElement('button');
+    btn.textContent = text;
+    btn.addEventListener('click', () => send(msg));
+    callOptionsEl.appendChild(btn);
+  };
+  for (const [type, label, key] of [['pon', 'Pon', 'ponOptions'], ['kan', 'Kan', 'openKanOptions'], ['chii', 'Chii', 'chiiOptions']]) {
+    for (const pair of game[key]) {
       const labels = pair.map((id) => tileLabel(mine.find((t) => t.id === id)));
-      const btn = document.createElement('button');
-      btn.textContent = `${label} ${labels.join(' ')}`;
-      btn.addEventListener('click', () => send({ type, tiles: pair }));
-      callOptionsEl.appendChild(btn);
+      button(`${label} ${labels.join(' ')}`, { type, tiles: pair });
     }
+  }
+  // Closed or added kans on your own turn.
+  const allMine = [...mine, ...(game.players[you]?.drawn ? [game.players[you].drawn] : [])];
+  for (const option of game.kanOptions) {
+    const tile = allMine.find((t) => t.id === option.tiles[0]);
+    button(`Kan ${tileLabel(tile)}${option.type === 'kakan' ? ' (added)' : ''}`, { type: 'kan', kind: option.kind });
   }
 }
 
@@ -441,6 +483,7 @@ riichiBtn.addEventListener('click', () => {
 nextHandBtn.addEventListener('click', () => send({ type: 'nextHand' }));
 rematchBtn.addEventListener('click', () => send({ type: 'rematch' }));
 tsumoBtn.addEventListener('click', () => send({ type: 'tsumo' }));
+kyuushuBtn.addEventListener('click', () => send({ type: 'kyuushu' }));
 ronBtn.addEventListener('click', () => send({ type: 'ron' }));
 passBtn.addEventListener('click', () => send({ type: 'pass' }));
 

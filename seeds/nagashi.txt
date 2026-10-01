@@ -1,0 +1,31 @@
+# Nagashi mangan: everyone discards their draw, and all of East's draws are terminals or honors.
+#   Every tab (East, South, West, North in turn): press Space to discard each draw, all hand long.
+#   You may be offered 6 calls along the way (pon or chii): press Skip. Nobody can win.
+#   East's 18 discards are all 1s, 9s and honors, none of them called.
+#   Expect: the wall runs out; exhaustive draw with nagashi mangan for East, paid like a dealer
+#   mangan tsumo: 4,000 from each player (no noten payments). Nobody is tenpai, so only East's
+#   hand is revealed, and the deal passes on: the next hand is East 2 with 1 honba.
+# Run: DEBUG_SEED=seeds/nagashi.txt npm start
+#
+# Hands: East 2s8p7p8m3m5p7m7m8m4p6p6s6m, South 2s7p4s9p8s4p2z2m5z1m5m9s4p,
+#        West 7s8p3z3m4z4m8m8p8p8s1z2m6z, North 2m3z5m6z7p7m9s9m9p7s7p8m3p
+
+# deal round 1: East, South, West, North (positions 0-15)
+2s8p7p8m  2s7p4s9p  7s8p3z3m  2m3z5m6z
+# deal round 2: East, South, West, North (positions 16-31)
+3m5p7m7m  8s4p2z2m  4z4m8m8p  7p7m9s9m
+# deal round 3: East, South, West, North (positions 32-47)
+8m4p6p6s  5z1m5m9s  8p8s1z2m  9p7s7p8m
+# one more each: East, South, West, North (48-51)
+6m4p6z3p
+# East's first draw (52): a terminal or honor (every 4th draw from here on is East's, all terminals and honors)
+2z
+# next draws: South, West, North, East (53-56)
+1m4s2p5z
+# rest of the live wall (57-121)
+0p6s1p5z1p3s6s1s5s6p6s3z5p4z7s1s6p4s7m7z6m5z5m9m7z8s8s9p3s2s4m9s3m
+6z5s9s3s2z1m9p4z3p4s4z2m1z1p7z7z6p1z1s1s1p2s2z3p3z4m1z2p0m3m9m5s
+# dead wall (122-135): 126 = dora indicator 3s, 127 = ura indicator 1m
+6m0s6z2p
+3s1m
+6m2p4p9m7s5p4m3p
