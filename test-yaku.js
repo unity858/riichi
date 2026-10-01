@@ -105,7 +105,7 @@ hand('haitei on the last tile', score(PINFU, '4s', { tsumo: true, haitei: true }
 hand('houtei on the last discard', score(PINFU, '4s', { houtei: true }), { yaku: ['Houtei raoyui', 'Pinfu'], han: 2 });
 hand('the winning tile is read as a two-sided wait when that scores more', score('12345m678p456s99p', '3m'), { yaku: ['Pinfu'], fu: 30, total: 1000 });
 hand('no yaku scores 0, and dora alone do not count', score('123m456p789s12s55m', '3s', { dora: '4m' }), { yaku: [], han: 0, total: 0 });
-check('kokushi is not scored until yakuman exist', score('19m19p19s1234567z', '1m') === null);
+check('kokushi now scores as a yakuman (see test-yakuman.js)', score('19m19p19s1234567z', '1m').yakuman === 2);
 
 // --- Compatibility (riichi-ref/yaku-compatibility.png) ---
 const KAN_HAND = ['123m456p789s5p', '5p', { melds: [['kan', '1111z', false]] }]; // closed kan, tanki wait

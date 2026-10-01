@@ -1,5 +1,5 @@
 // Shared helpers for the test-*.js scripts.
-import { newHand } from './game.js';
+import { newHand, claim } from './game.js';
 
 // Parse short notation like "123m456p11z" into tile objects (0 = red five).
 // Ids start at `base` so hands built for different seats never share an id.
@@ -28,6 +28,13 @@ export function table({ hands = {}, drawn, wall, scores } = {}) {
   if (drawn) state.players[0].drawn = parse(drawn, 1900)[0];
   if (wall !== undefined) state.wall = state.wall.slice(0, wall);
   return state;
+}
+
+// Every undecided seat except `keep` passes on the open discard (ron and chii offers).
+export function passClaims(state, keep = null) {
+  for (const seat of Object.keys(state.claims).map(Number)) {
+    if (seat !== keep && state.claims[seat] === null) claim(state, seat, 'pass');
+  }
 }
 
 // Puts `tiles` at the front of the wall, so the next draws are exactly those tiles in order.

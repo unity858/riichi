@@ -1,6 +1,6 @@
 // Run with: node test-win.js
 import { newHand, draw, discard, tsumo, claim, canTsumo, canRon, checkIntegrity } from './game.js';
-import { parse, table, stackWall, check, done } from './test-helpers.js';
+import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
 import { furitenStatus } from './game.js';
 
 {
@@ -83,7 +83,7 @@ import { furitenStatus } from './game.js';
   const s = table({ hands: { 0: '1234567m2468p13s', 1: '123m456p789s1122z' }, drawn: '2z' });
   s.players[1].discards = parse('1z', 1950);
   discard(s, s.players[0].drawn.id);
-  check('furiten: no ron on any wait once one of them is in your own discards', s.phase === 'draw' && !canRon(s, 1));
+  check('furiten: no ron on any wait once one of them is in your own discards', !canRon(s, 1));
 }
 
 {
@@ -119,7 +119,8 @@ function waitingSeat2(wall, riichi = false) {
   return s;
 }
 // The current player discards their draw; returns the discarded tile.
-const passTurn = (s) => { draw(s); return discard(s, s.players[s.current].drawn.id); };
+// Any open claim from the previous discard is passed first (pairs in these hands can be ponned).
+const passTurn = (s) => { passClaims(s); draw(s); return discard(s, s.players[s.current].drawn.id); };
 
 {
   const s = waitingSeat2('2z9m1z');
@@ -127,7 +128,7 @@ const passTurn = (s) => { draw(s); return discard(s, s.players[s.current].drawn.
   claim(s, 2, 'pass');
   check('passing it makes you temporarily furiten', furitenStatus(s, 2).temporary);
   passTurn(s); // seat 1 discards 2z
-  check('temporary furiten: no ron on another wait before your next discard', s.phase === 'draw' && !canRon(s, 2));
+  check('temporary furiten: no ron on another wait before your next discard', !canRon(s, 2));
   passTurn(s); // seat 2 discards 9m
   check('your own discard lifts temporary furiten', !furitenStatus(s, 2).temporary);
   passTurn(s); // seat 3 discards 1z
@@ -150,7 +151,7 @@ const passTurn = (s) => { draw(s); return discard(s, s.players[s.current].drawn.
   const f = furitenStatus(s, 2);
   check('riichi furiten stays after your next discard', f.riichi && !f.temporary);
   passTurn(s); // seat 3 discards 1z
-  check('riichi furiten: no ron for the rest of the hand', s.phase === 'draw' && !canRon(s, 2));
+  check('riichi furiten: no ron for the rest of the hand', !canRon(s, 2));
   passTurn(s); passTurn(s); passTurn(s); // seats 0, 1, 2
   draw(s); // seat 3 draws 2z
   discard(s, s.players[3].drawn.id);
@@ -185,7 +186,7 @@ for (let i = 0; i < 300; i++) {
     if (s.phase === 'discard') {
       if (!tsumo(s, s.current)) discard(s, s.players[s.current].drawn.id);
     } else if (s.phase === 'claim') {
-      for (const seat of Object.keys(s.claims)) claim(s, Number(seat), 'ron');
+      for (const seat of Object.keys(s.claims)) claim(s, Number(seat), canRon(s, Number(seat)) ? 'ron' : 'pass');
     }
     draw(s);
   }

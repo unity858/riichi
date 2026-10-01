@@ -1,9 +1,9 @@
 // Run with: node test-riichi.js
 import {
-  newHand, draw, discard, tsumo, claim, canTsumo, riichiDiscards, canRiichi, declareRiichi, autoDiscardDue,
-  checkIntegrity,
+  newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, canRiichi, declareRiichi,
+  autoDiscardDue, checkIntegrity,
 } from './game.js';
-import { parse, table, stackWall, check, done } from './test-helpers.js';
+import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
 
 const PINFU = '123m456p789s23s55m'; // waits 1s/4s
 const TENPAI = '123m456p789s1122z'; // waits 1z/2z
@@ -21,6 +21,7 @@ function roundTrip(s) {
   for (let i = 0; i < 3; i++) {
     draw(s);
     discard(s, s.players[s.current].drawn.id);
+    passClaims(s); // the next seat may be offered a chii
   }
   draw(s);
 }
@@ -80,6 +81,7 @@ function roundTrip(s) {
   for (let i = 0; i < 3; i++) {
     draw(s);
     discard(s, s.players[s.current].drawn.id);
+    passClaims(s); // the next seat may be offered a chii
   }
   draw(s);
   tsumo(s, 0);
@@ -114,6 +116,7 @@ function roundTrip(s) {
   declareRiichi(s, 0, s.players[0].drawn.id);
   while (s.phase !== 'ended') {
     if (s.phase === 'discard') discard(s, s.players[s.current].drawn.id);
+    passClaims(s);
     draw(s);
   }
   const next = newHand({ scores: s.scores, riichiSticks: s.riichiSticks });
@@ -122,10 +125,14 @@ function roundTrip(s) {
 }
 
 // Random chained hands: players discard random tiles, declare riichi whenever they can,
-// and win whenever they can. Points plus sticks on the table always total 100000.
+// win whenever they can, and pon or chii a quarter of the time they can (more often would open
+// most hands, leaving few chances to riichi). Points plus sticks on the table
+// always total 100000, and every tile is accounted for.
 let scores;
 let sticks = 0;
 let riichis = 0;
+let chiis = 0;
+let ponCalls = 0;
 let ok = true;
 for (let i = 0; i < 300; i++) {
   const s = newHand(scores ? { scores, riichiSticks: sticks } : {});
@@ -141,11 +148,23 @@ for (let i = 0; i < 300; i++) {
       } else if (me.riichi) {
         discard(s, me.drawn.id);
       } else {
-        const tiles = [...me.hand, me.drawn];
+        const tiles = [...me.hand, me.drawn].filter(Boolean); // no drawn tile right after a chii
         discard(s, tiles[Math.floor(Math.random() * tiles.length)].id);
       }
     } else if (s.phase === 'claim') {
-      for (const seat of Object.keys(s.claims)) claim(s, Number(seat), 'ron');
+      for (const key of Object.keys(s.claims)) {
+        const seat = Number(key);
+        const pairs = chiiOptions(s, seat);
+        const pons = ponOptions(s, seat);
+        if (canRon(s, seat)) claim(s, seat, 'ron');
+        else if (pons.length && Math.random() < 0.25) {
+          claim(s, seat, 'pon', pons[Math.floor(Math.random() * pons.length)]);
+          ponCalls++;
+        } else if (pairs.length && Math.random() < 0.25) {
+          claim(s, seat, 'chii', pairs[Math.floor(Math.random() * pairs.length)]);
+          chiis++;
+        } else claim(s, seat, 'pass');
+      }
     }
     draw(s);
   }
@@ -154,6 +173,7 @@ for (let i = 0; i < 300; i++) {
   scores = s.scores;
   sticks = s.riichiSticks;
 }
-check(`300 chained random hands with riichi keep points + sticks at 100000 (${riichis} riichi declared)`, ok && riichis > 0);
+check(`300 chained random hands with riichi, pon and chii keep points + sticks at 100000 (${riichis} riichi, ${ponCalls} pon, ${chiis} chii)`,
+  ok && chiis > 0 && ponCalls > 0); // riichi has its own tests; here it is just counted
 
 done();

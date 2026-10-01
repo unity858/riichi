@@ -1,6 +1,6 @@
 // Run with: node test-scoring.js
 import { newHand, draw, discard, tsumo, claim, checkIntegrity, STARTING_SCORE } from './game.js';
-import { parse, table, check, done } from './test-helpers.js';
+import { parse, table, passClaims, check, done } from './test-helpers.js';
 
 // Waits on 1z/2z, so it stays tenpai when seat 0 discards 9s.
 const TENPAI = '123m456p789s1122z';
@@ -107,7 +107,9 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
 // Seat 0 is the East dealer in the East round: 111z is both seat and round wind.
 
 {
+  // An earlier discard, so this isn't the dealer's first draw (which would be tenhou).
   const s = table({ hands: { 0: TENPAI }, drawn: '1z' });
+  s.players[0].discards = parse('9p', 1950);
   s.doraIndicators = [];
   tsumo(s, 0);
   const [score] = s.result.scores;
@@ -149,6 +151,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
 
 {
   const s = table({ hands: { 0: '123m456p789s23s55m' }, drawn: '4s', wall: 0 });
+  s.players[0].discards = parse('9p', 1950); // not the first draw, so not tenhou
   s.doraIndicators = [];
   tsumo(s, 0);
   check('tsumo on the last tile scores haitei', s.result.scores[0].yaku.some((y) => y.name === 'Haitei raoyue'));
@@ -160,6 +163,7 @@ for (let i = 0; i < 100; i++) {
   const s = newHand();
   for (let steps = 0; s.phase !== 'ended' && steps < 1000; steps++) {
     if (s.phase === 'discard') discard(s, s.players[s.current].drawn.id);
+    passClaims(s);
     draw(s);
   }
   ok &&= s.phase === 'ended' && checkIntegrity(s) && s.scores.reduce((a, b) => a + b) === 100000;

@@ -55,14 +55,16 @@ export function sortHand(hand) {
   return hand.sort(compareTiles);
 }
 
-// scores and riichiSticks (unclaimed 1000-point riichi deposits) carry over from the
-// previous hand. wall replaces the random shuffle with a fixed order of all 136 tiles
-// (see seed.js for how the positions are used).
+// scores, riichiSticks (unclaimed 1000-point riichi deposits) and honba (the repeat counter,
+// worth HONBA_POINTS each to the winner) carry over from the previous hand; see match.js.
+// wall replaces the random shuffle with a fixed order of all 136 tiles (see seed.js for how
+// the positions are used).
 export function newHand({
   dealer = 0,
   roundWind = 0,
   scores = [0, 1, 2, 3].map(() => STARTING_SCORE),
   riichiSticks = 0,
+  honba = 0,
   wall: fixedWall = null,
 } = {}) {
   const wall = fixedWall ? [...fixedWall] : createWall();
@@ -78,6 +80,10 @@ export function newHand({
     drawn: null,
     discards: [],
     tsumogiri: [], // per discard: true if it was the tile just drawn
+    called: [], // per discard: true if another player called it (it stays in the pond)
+    // Open melds, public: { type: 'chi' | 'pon', open, tiles, from, calledId }. tiles[0] is the
+    // called tile, taken from seat `from`.
+    melds: [],
     // Set on declaration: { turn, discardIndex, double, ippatsu }. turn is state.turnCount
     // when declared, discardIndex the riichi tile's index in discards.
     riichi: null,
@@ -103,11 +109,18 @@ export function newHand({
     roundWind,
     scores: [...scores],
     riichiSticks,
+    honba,
     pendingRiichi: null, // seat whose riichi discard is waiting to pass before the stick is paid
     turnCount: 0,
     discardLog: [], // every discard in order: { tile, from, turn }, turn = turnCount before it
     lastDiscard: null, // { tile, from } while other players may claim it
-    claims: {}, // seat -> null (undecided) | 'ron' | 'pass', during the 'claim' phase
+    // During the 'claim' phase, for each seat that can act on the discard:
+    //   claimOptions: seat -> { ron: bool, pon: [[tileId, tileId], ...], chii: [...] }
+    //   claims:       seat -> null (undecided) | 'ron' | 'pon' | 'chii' | 'pass'
+    claimOptions: {},
+    claims: {},
+    callChoices: {}, // { pon: { seat, tiles }, chii: { seat, tiles } } as they are chosen
+    callMade: false, // any call this hand (ends the chance of a double riichi)
     result: null, // set when the hand ends, see endHand()
   };
 
@@ -156,25 +169,30 @@ export function discard(state, tileId) {
   sortHand(player.hand);
   player.discards.push(tile);
   player.tsumogiri.push(fromDraw);
+  player.called.push(false);
 
   const turn = state.turnCount;
   state.turnCount++;
   state.current = (state.current + 1) % 4;
 
-  // Anyone who can win on this tile gets to decide before play moves on.
-  // This includes the last discard of the hand, after the wall is empty.
-  // Furiten players can't ron (they may still tsumo). The check runs before this tile is
-  // logged, so it doesn't count as a tile they already let pass.
-  const claims = {};
+  // Anyone who can act on this tile decides before play moves on: ron for anyone it
+  // completes (including on the last discard, after the wall is empty), pon for anyone
+  // holding two more, chii for the next player. Furiten players can't ron (they may still
+  // tsumo). The check runs before this tile is logged, so it doesn't count as a tile they
+  // already let pass.
+  const options = {};
   for (const p of state.players) {
-    if (p.seat !== player.seat && isComplete(toCounts([...p.hand, tile])) && !isFuritenNow(state, p.seat)) {
-      claims[p.seat] = null;
-    }
+    if (p.seat === player.seat) continue;
+    const ron = isComplete(toCounts([...p.hand, tile])) && !isFuritenNow(state, p.seat);
+    const pon = ponPairs(state, p, tile);
+    const chii = p.seat === state.current ? chiiPairs(state, p, tile) : [];
+    if (ron || pon.length > 0 || chii.length > 0) options[p.seat] = { ron, pon, chii };
   }
   state.discardLog.push({ tile, from: player.seat, turn });
-  if (Object.keys(claims).length > 0) {
+  if (Object.keys(options).length > 0) {
     state.lastDiscard = { tile, from: player.seat };
-    state.claims = claims;
+    state.claimOptions = options;
+    state.claims = Object.fromEntries(Object.keys(options).map((seat) => [seat, null]));
     state.phase = 'claim';
   } else {
     afterDiscard(state);
@@ -182,16 +200,26 @@ export function discard(state, tileId) {
   return tile;
 }
 
-// Nobody took the discard: the next player draws, or the hand ends if the wall is empty.
-// A riichi declared on this discard now stands, so its 1000-point stick goes on the table.
-function afterDiscard(state) {
+function clearClaims(state) {
   state.lastDiscard = null;
+  state.claimOptions = {};
   state.claims = {};
-  if (state.pendingRiichi !== null) {
-    state.scores[state.pendingRiichi] -= 1000;
-    state.riichiSticks++;
-    state.pendingRiichi = null;
-  }
+  state.callChoices = {};
+}
+
+// A riichi declared on the discard that just passed (not ronned) now stands, so its
+// 1000-point stick goes on the table.
+function settleRiichi(state) {
+  if (state.pendingRiichi === null) return;
+  state.scores[state.pendingRiichi] -= 1000;
+  state.riichiSticks++;
+  state.pendingRiichi = null;
+}
+
+// Nobody took the discard: the next player draws, or the hand ends if the wall is empty.
+function afterDiscard(state) {
+  clearClaims(state);
+  settleRiichi(state);
   if (state.wall.length === 0) endHand(state, exhaustiveDraw(state));
   else state.phase = 'draw';
 }
@@ -201,11 +229,12 @@ function afterDiscard(state) {
 //
 // Nagashi mangan: a player whose discards are all terminals and honors, none of them
 // called, is paid a mangan as if by tsumo. When anyone gets it, it replaces the noten
-// payments. There are no calls yet, so every discard counts as uncalled.
+// payments.
 function exhaustiveDraw(state) {
   const tenpai = state.players.filter((p) => isTenpai(p.hand)).map((p) => p.seat);
   const nagashi = state.players
-    .filter((p) => p.discards.length > 0 && p.discards.every((t) => TERMINALS_AND_HONORS.includes(tileIndex(t))))
+    .filter((p) => p.discards.length > 0 && !p.called.some(Boolean) &&
+      p.discards.every((t) => TERMINALS_AND_HONORS.includes(tileIndex(t))))
     .map((p) => p.seat);
 
   if (nagashi.length > 0) {
@@ -225,7 +254,8 @@ function exhaustiveDraw(state) {
   return { type: 'exhaustiveDraw', tenpai, nagashi, deltas };
 }
 
-// result: { type: 'tsumo' | 'ron', winners: [seat...], scores: [score per winner], tile, from, deltas }
+// result: { type: 'tsumo' | 'ron', winners: [seat...], scores: [score per winner], tile, from, deltas,
+//           sticks (riichi sticks collected), honbaBonus (points from honba) }
 //      or { type: 'exhaustiveDraw', tenpai: [seat...], nagashi: [seat...], deltas: [points per seat] }.
 function endHand(state, result) {
   state.result = result;
@@ -235,13 +265,15 @@ function endHand(state, result) {
 
 // --- Winning ---
 // Any complete shape wins for now: a hand with no yaku may still win but scores 0 points.
-// Furiten is not enforced.
 
-// Scores seat's win on tile (see scoring.js). There are no calls or riichi yet, so hands are
-// always closed and riichi, ippatsu, rinshan and chankan never apply.
+// Scores seat's win on tile (see scoring.js), with their open melds. There are no kans
+// yet, so rinshan and chankan never apply.
 function scoreWin(state, seat, tile, tsumo) {
   const lastTile = state.wall.length === 0;
   const { riichi } = state.players[seat];
+  // A tsumo on your very first draw, with nobody having called: tenhou for the dealer,
+  // chiihou for anyone else.
+  const firstDraw = tsumo && state.players[seat].discards.length === 0 && !state.callMade;
   const ctx = {
     tsumo,
     dealer: seat === state.dealer,
@@ -254,9 +286,11 @@ function scoreWin(state, seat, tile, tsumo) {
     ippatsu: !!riichi?.ippatsu,
     haitei: tsumo && lastTile,
     houtei: !tsumo && lastTile,
+    tenhou: firstDraw && seat === state.dealer,
+    chiihou: firstDraw && seat !== state.dealer,
   };
-  // Kokushi has no standard reading and is not scored until yakuman are added.
-  return scoreHand(state.players[seat].hand, tile, [], ctx) ?? {
+  // The game only lets complete hands win, so the fallback is just a safeguard.
+  return scoreHand(state.players[seat].hand, tile, state.players[seat].melds, ctx) ?? {
     yaku: [], dora: { dora: 0, aka: 0, ura: 0 }, han: 0, fu: 0, basic: 0, limit: null,
     payment: payments(0, ctx), total: 0,
   };
@@ -275,6 +309,20 @@ function collectSticks(state, winner, deltas) {
   return sticks;
 }
 
+// Each honba adds HONBA_POINTS to the win, going to the same winner as the riichi sticks:
+// on a ron the discarder pays it all, on a tsumo each other player pays a third.
+export const HONBA_POINTS = 300;
+function payHonba(state, winner, from, deltas) {
+  const bonus = state.honba * HONBA_POINTS;
+  if (from === null) {
+    for (let seat = 0; seat < 4; seat++) if (seat !== winner) deltas[seat] -= bonus / 3;
+  } else {
+    deltas[from] -= bonus;
+  }
+  deltas[winner] += bonus;
+  return bonus;
+}
+
 export function canTsumo(state, seat) {
   const player = state.players[seat];
   return state.phase === 'discard' && state.current === seat && !!player.drawn &&
@@ -287,7 +335,10 @@ export function tsumo(state, seat) {
   const score = scoreWin(state, seat, tile, true);
   const deltas = pointDeltas(score, { winner: seat, dealer: state.dealer, from: null, tsumo: true });
   const sticks = collectSticks(state, seat, deltas);
-  endHand(state, { type: 'tsumo', winners: [seat], scores: [score], tile, from: null, deltas, sticks, ...revealUra(state, [seat]) });
+  const honbaBonus = payHonba(state, seat, null, deltas);
+  endHand(state, {
+    type: 'tsumo', winners: [seat], scores: [score], tile, from: null, deltas, sticks, honbaBonus, ...revealUra(state, [seat]),
+  });
   return true;
 }
 
@@ -297,13 +348,70 @@ function revealUra(state, winners) {
 }
 
 export function canRon(state, seat) {
-  return state.phase === 'claim' && state.claims[seat] === null;
+  return state.phase === 'claim' && state.claims[seat] === null && !!state.claimOptions[seat]?.ron;
 }
 
-// action is 'ron' or 'pass'. Once every eligible player has decided, everyone who called
-// ron wins (double and triple ron are allowed); if nobody did, play continues.
-export function claim(state, seat, action) {
-  if (!canRon(state, seat) || (action !== 'ron' && action !== 'pass')) return false;
+// The pairs of hand tiles (by id) seat could reveal to pon or chii the open discard.
+function callOptions(state, seat, type) {
+  if (state.phase !== 'claim' || state.claims[seat] !== null) return [];
+  return state.claimOptions[seat]?.[type] ?? [];
+}
+export const ponOptions = (state, seat) => callOptions(state, seat, 'pon');
+export const chiiOptions = (state, seat) => callOptions(state, seat, 'chii');
+
+// Distinct pairs of hand tiles of the discard's kind, for a pon: two plain copies, or a plain
+// one with the red five. Anyone but the discarder may pon, except on the last discard or
+// while in riichi.
+function ponPairs(state, player, tile) {
+  if (player.riichi || state.wall.length === 0) return [];
+  const same = player.hand.filter((t) => t.suit === tile.suit && t.rank === tile.rank);
+  const plain = same.filter((t) => !t.red);
+  const red = same.find((t) => t.red);
+  const pairs = [];
+  if (plain.length >= 2) pairs.push([plain[0].id, plain[1].id]);
+  if (plain.length >= 1 && red) pairs.push([plain[0].id, red.id]);
+  return pairs;
+}
+
+// Distinct pairs of hand tiles that make a run with the discard; a red five counts as
+// different from a plain five, since revealing it matters. No chii on honors, on the last
+// discard (the wall is empty), or while in riichi. Kuikae is not restricted yet.
+function chiiPairs(state, player, tile) {
+  if (tile.suit === 'z' || player.riichi || state.wall.length === 0) return [];
+  // One tile of the rank for each look (plain and red).
+  const looks = (rank) => {
+    const byLook = new Map();
+    for (const t of player.hand) {
+      if (t.suit === tile.suit && t.rank === rank && !byLook.has(t.red)) byLook.set(t.red, t);
+    }
+    return [...byLook.values()];
+  };
+  const r = tile.rank;
+  const pairs = [];
+  for (const [a, b] of [[r - 2, r - 1], [r - 1, r + 1], [r + 1, r + 2]]) {
+    if (a < 1 || b > 9) continue;
+    for (const x of looks(a)) for (const y of looks(b)) pairs.push([x.id, y.id]);
+  }
+  return pairs;
+}
+
+// action is 'ron', 'pon' or 'chii' (tiles = one of that call's options), or 'pass'. Once
+// every seat that can act has decided, the priority is ron > pon > chii: everyone who called
+// ron wins (double and triple ron are allowed); otherwise a pon is made; otherwise a chii;
+// otherwise play continues. Two players can never both pon the same tile (it would take
+// five copies), so each call has at most one taker.
+export function claim(state, seat, action, tiles = null) {
+  if (state.phase !== 'claim' || state.claims[seat] !== null) return false;
+  if (action === 'ron') {
+    if (!canRon(state, seat)) return false;
+  } else if (action === 'pon' || action === 'chii') {
+    const option = callOptions(state, seat, action)
+      .find((o) => tiles && o.length === tiles.length && o.every((id, i) => id === tiles[i]));
+    if (!option) return false;
+    state.callChoices[action] = { seat, tiles: option };
+  } else if (action !== 'pass') {
+    return false;
+  }
   state.claims[seat] = action;
   if (Object.values(state.claims).includes(null)) return true;
 
@@ -323,22 +431,56 @@ export function claim(state, seat, action) {
     const deltas = sumDeltas(scores.map((score, i) =>
       pointDeltas(score, { winner: winners[i], dealer: state.dealer, from, tsumo: false })));
     const sticks = collectSticks(state, winners[0], deltas);
-    endHand(state, { type: 'ron', winners, scores, tile, from, deltas, sticks, ...revealUra(state, winners) });
+    const honbaBonus = payHonba(state, winners[0], from, deltas);
+    endHand(state, { type: 'ron', winners, scores, tile, from, deltas, sticks, honbaBonus, ...revealUra(state, winners) });
+  } else if (state.callChoices.pon) {
+    makeCall(state, 'pon', state.callChoices.pon);
+  } else if (state.callChoices.chii) {
+    makeCall(state, 'chi', state.callChoices.chii);
   } else {
     afterDiscard(state);
   }
   return true;
 }
 
+// A chosen pon or chii: the two hand tiles and the discard form an open meld (the called tile
+// first; see calledTilePosition for where it is shown sideways). The discard stays in the
+// discarder's pond, marked as called. The turn goes to the caller, skipping any seats in
+// between, and they discard next without drawing, so the draws left don't change.
+// A call ends every riichi player's ippatsu and any chance of a double riichi.
+function makeCall(state, type, { seat, tiles: ids }) {
+  const { tile, from } = state.lastDiscard;
+  const caller = state.players[seat];
+  const taken = ids.map((id) => caller.hand.splice(caller.hand.findIndex((t) => t.id === id), 1)[0]);
+  caller.melds.push({ type, open: true, tiles: [tile, ...taken.sort(compareTiles)], from, calledId: tile.id });
+  const discarder = state.players[from];
+  discarder.called[discarder.discards.length - 1] = true;
+
+  clearClaims(state);
+  settleRiichi(state);
+  state.callMade = true;
+  for (const p of state.players) if (p.riichi) p.riichi.ippatsu = false;
+  state.current = seat;
+  state.phase = 'discard';
+}
+
+// Where a meld's sideways (called) tile goes, as an index into the three tiles shown: the
+// side it came from. From the player on your left (the previous seat) it goes first, from
+// the player opposite in the middle, from the player on your right last. A chii is always
+// from the left.
+export function calledTilePosition(meld, seat) {
+  return { 3: 0, 2: 1, 1: 2 }[(meld.from - seat + 4) % 4];
+}
+
 // --- Riichi ---
 
 // Tiles (by id) the current player could discard to declare riichi: the ones that leave
-// the hand tenpai. Empty if riichi isn't allowed right now: it needs a closed hand (hands
-// are always closed until calls exist), no riichi yet, 1000 points for the stick, and at
-// least 4 tiles left in the wall.
+// the hand tenpai. Empty if riichi isn't allowed right now: it needs a closed hand (no open
+// melds), no riichi yet, 1000 points for the stick, and at least 4 tiles left in the wall.
 export function riichiDiscards(state, seat) {
   const player = state.players[seat];
   if (state.phase !== 'discard' || state.current !== seat || !player.drawn || player.riichi) return [];
+  if (player.melds.some((m) => m.open)) return [];
   if (state.scores[seat] < 1000 || state.wall.length < 4) return [];
   const tiles = [...player.hand, player.drawn];
   return tiles.filter((t) => isTenpai(tiles.filter((x) => x !== t))).map((t) => t.id);
@@ -349,15 +491,14 @@ export function canRiichi(state, seat) {
 }
 
 // Declares riichi by discarding tileId. It is a double riichi on the player's first discard
-// of the hand with no calls before it (there are no calls yet, so the first go-around is
-// always uninterrupted). The stick is paid once the discard passes without a ron.
+// of the hand with no calls before it. The stick is paid once the discard passes without a ron.
 export function declareRiichi(state, seat, tileId) {
   if (!riichiDiscards(state, seat).includes(tileId)) return false;
   const player = state.players[seat];
   player.riichi = {
     turn: state.turnCount,
     discardIndex: player.discards.length,
-    double: player.discards.length === 0 && state.turnCount < 4,
+    double: player.discards.length === 0 && state.turnCount < 4 && !state.callMade,
     ippatsu: true,
   };
   state.pendingRiichi = seat;
@@ -497,12 +638,14 @@ function isFuritenNow(state, seat) {
   return f.discard || f.temporary || f.riichi;
 }
 
-// Debug helper: confirms every tile id appears exactly once.
+// Debug helper: confirms every tile id appears exactly once. A called tile is counted in
+// the discarder's pond, where it still shows, not again in the caller's meld.
 export function checkIntegrity(state) {
+  const meldTiles = (p) => p.melds.flatMap((m) => m.tiles.filter((t) => t.id !== m.calledId));
   const ids = [
     ...state.wall,
     ...state.deadWall,
-    ...state.players.flatMap((p) => [...p.hand, ...(p.drawn ? [p.drawn] : []), ...p.discards]),
+    ...state.players.flatMap((p) => [...p.hand, ...(p.drawn ? [p.drawn] : []), ...p.discards, ...meldTiles(p)]),
   ].map((t) => t.id);
   const unique = new Set(ids);
   return ids.length === 136 && unique.size === 136;

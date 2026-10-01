@@ -1,13 +1,20 @@
 // Renders the server-provided view and sends player intents. No game logic here.
+// Three screens: the lobby (name, create or join a room), the waiting room, and the table.
+// The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, kindLabel, getWaits, WINDS } from './game.js';
+import { tileLabel, kindLabel, getWaits, calledTilePosition, WINDS } from './game.js';
 
-const infoEl = document.getElementById('info');
-const newHandBtn = document.getElementById('new-hand');
+const $ = (id) => document.getElementById(id);
+const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table') };
+const infoEl = $('info');
+const nextHandBtn = $('next-hand');
+const rematchBtn = $('rematch');
+const leaveTableBtn = $('leave-table');
 const riichiBtn = document.getElementById('riichi');
 const tsumoBtn = document.getElementById('tsumo');
 const ronBtn = document.getElementById('ron');
 const passBtn = document.getElementById('pass');
+const callOptionsEl = document.getElementById('call-options');
 const seatEls = {
   bottom: document.querySelector('.seat-bottom'),
   right: document.querySelector('.seat-right'),
@@ -26,16 +33,136 @@ let view = null;
 let choosingRiichi = false;
 const ws = new WebSocket(SERVER_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
 
+// Each tab is its own player, so its id lives in sessionStorage: reloading keeps your seat,
+// and several tabs in one browser can sit at the same table. Your name is remembered.
+const playerId = sessionStorage.getItem('riichiId') ?? crypto.randomUUID();
+sessionStorage.setItem('riichiId', playerId);
+$('name').value = localStorage.getItem('riichiName') ?? '';
+const myName = () => {
+  const name = $('name').value.trim() || 'Player';
+  localStorage.setItem('riichiName', name);
+  return name;
+};
+const roomInUrl = () => new URLSearchParams(location.search).get('room');
+const setUrlRoom = (code) => {
+  const url = new URL(location.href);
+  if (code) url.searchParams.set('room', code); else url.searchParams.delete('room');
+  history.replaceState(null, '', url);
+};
+
+ws.addEventListener('open', () => {
+  // Opening an invite link (or reloading) rejoins that room straight away if we have a name.
+  const code = roomInUrl();
+  if (code) $('join-code').value = code;
+  if (code && localStorage.getItem('riichiName')) send({ type: 'join', code, id: playerId, name: myName() });
+  else showScreen('lobby');
+});
 ws.addEventListener('message', (e) => {
-  view = JSON.parse(e.data);
-  render();
+  const msg = JSON.parse(e.data);
+  if (msg.type === 'joined') setUrlRoom(msg.code);
+  else if (msg.type === 'left') {
+    view = null;
+    setUrlRoom(null);
+    showScreen('lobby');
+  } else if (msg.type === 'error') {
+    $('lobby-error').textContent = msg.message;
+    if (!view) showScreen('lobby');
+  } else if (msg.type === 'state') {
+    view = msg;
+    render();
+  }
 });
 ws.addEventListener('close', () => {
-  infoEl.innerHTML = '<div class="status">Disconnected from server. Reload the page to reconnect.</div>';
+  document.body.insertAdjacentHTML('afterbegin', '<p class="banner">Disconnected from the server. Reload the page to reconnect.</p>');
 });
 
 function send(msg) {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function showScreen(name) {
+  for (const [key, el] of Object.entries(screens)) el.hidden = key !== name;
+}
+
+// --- Settings ---
+
+const SETTING_FIELDS = [
+  { key: 'length', label: 'Length', options: [['east', 'East only (tonpuusen)'], ['south', 'East + South (hanchan)']] },
+  { key: 'bust', label: 'End the match when someone goes below 0' },
+  { key: 'extension', label: 'Sudden death: if nobody has 30,000 at the end, play on into the next wind' },
+  { key: 'agariYame', label: 'Agari-yame: a last-hand dealer in first place may end the match' },
+];
+const DEFAULT_SETTINGS = { length: 'south', bust: true, extension: true, agariYame: true };
+
+// Fills container with the settings; editable ones call onChange with the new settings.
+function renderSettings(container, settings, editable, onChange) {
+  container.innerHTML = '';
+  for (const field of SETTING_FIELDS) {
+    const row = document.createElement('label');
+    row.className = 'setting';
+    let input;
+    if (field.options) {
+      input = document.createElement('select');
+      for (const [value, text] of field.options) input.add(new Option(text, value, false, settings[field.key] === value));
+      row.append(`${field.label} `, input);
+    } else {
+      input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = settings[field.key];
+      row.append(input, ` ${field.label}`);
+    }
+    input.disabled = !editable;
+    input.addEventListener('change', () => {
+      onChange({ ...settings, [field.key]: field.options ? input.value : input.checked });
+    });
+    container.appendChild(row);
+  }
+}
+
+let createSettings = { ...DEFAULT_SETTINGS };
+const drawCreateSettings = () => renderSettings($('create-settings'), createSettings, true, (s) => {
+  createSettings = s;
+  drawCreateSettings();
+});
+drawCreateSettings();
+
+$('create').addEventListener('click', () => send({ type: 'create', id: playerId, name: myName(), settings: createSettings }));
+$('join').addEventListener('click', () => {
+  const code = $('join-code').value.trim().toLowerCase();
+  if (!/^[0-9a-f]{6}$/.test(code)) {
+    $('lobby-error').textContent = 'A room code is 6 characters, 0-9 and a-f.';
+    return;
+  }
+  send({ type: 'join', code, id: playerId, name: myName() });
+});
+$('copy-link').addEventListener('click', async () => {
+  await navigator.clipboard?.writeText(location.href);
+  $('copied').hidden = false;
+  setTimeout(() => ($('copied').hidden = true), 1500);
+});
+$('start').addEventListener('click', () => send({ type: 'start' }));
+for (const id of ['leave-waiting', 'leave-table']) $(id).addEventListener('click', () => send({ type: 'leave' }));
+
+function renderWaiting() {
+  const { room, you } = view;
+  $('room-code').textContent = room.code;
+  const list = $('seat-list');
+  list.innerHTML = '';
+  room.seats.forEach((p, i) => {
+    const li = document.createElement('li');
+    li.textContent = p ? `${p.name}${i === you ? ' (you)' : ''}${i === room.hostSeat ? ' · host' : ''}${p.connected ? '' : ' · offline'}` : 'Empty seat';
+    li.className = p ? '' : 'empty';
+    list.appendChild(li);
+  });
+  $('spectator-count').textContent = room.spectators ? `${room.spectators} watching` : '';
+  const isHost = you !== null && you === room.hostSeat;
+  renderSettings($('room-settings'), room.settings, isHost, (s) => send({ type: 'settings', settings: s }));
+  const full = room.seats.every(Boolean);
+  $('start').hidden = !isHost;
+  $('start').disabled = !full;
+  $('waiting-hint').textContent = you === null ? 'The room is full: you are watching.'
+    : isHost ? (full ? 'Everyone is here.' : 'Share the invite link; the match can start once all four seats are taken.')
+      : 'Waiting for the host to start the match.';
 }
 
 // clickable discards the tile, or declares riichi with it while choosing a riichi tile.
@@ -75,8 +202,10 @@ function seatWind(seat, dealer) {
   return WINDS[(seat - dealer + 4) % 4];
 }
 
+const nameOf = (seat) => view.room.seats[seat]?.name ?? `Player ${seat + 1}`;
+
 function playerName(seat, game) {
-  return `${seatWind(seat, game.dealer)} (Player ${seat + 1})`;
+  return `${seatWind(seat, game.dealer)} (${nameOf(seat)})`;
 }
 
 function renderSeat(el, player, game, you) {
@@ -88,8 +217,8 @@ function renderSeat(el, player, game, you) {
 
   const name = document.createElement('div');
   name.className = 'seat-name';
-  const who = player.seat === you ? 'You' : `Player ${player.seat + 1}`;
-  const offline = view.connected[player.seat] ? '' : ' (offline)';
+  const who = player.seat === you ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
+  const offline = view.room.seats[player.seat]?.connected ? '' : ' (offline)';
   // The dealer's seat wind (always E) is shown in red.
   const wind = seatWind(player.seat, game.dealer);
   name.innerHTML = (player.seat === game.dealer ? `<span class="dealer">${wind}</span>` : wind) +
@@ -125,10 +254,26 @@ function renderSeat(el, player, game, you) {
       hand.appendChild(back);
     }
   }
+  // Open melds are public, to the right of the hand. The called tile lies sideways.
+  if (player.melds.length) {
+    const melds = document.createElement('div');
+    melds.className = 'melds';
+    for (const meld of player.melds) {
+      const group = document.createElement('div');
+      group.className = 'meld';
+      // The called tile goes on the side it came from.
+      const [called, ...own] = meld.tiles;
+      own.splice(calledTilePosition(meld, player.seat), 0, called);
+      own.forEach((t) => group.appendChild(tileEl(t, { extraClass: t.id === meld.calledId ? 'called' : '' })));
+      melds.appendChild(group);
+    }
+    hand.appendChild(melds);
+  }
   el.appendChild(hand);
 
-  // Between your turns, show your own waits.
-  if (player.seat === you && player.hand && !player.drawn && !won) {
+  // Between your turns, show your own waits (not mid-turn, e.g. right after a chii).
+  const myDiscard = game.current === you && game.phase === 'discard';
+  if (player.seat === you && player.hand && !player.drawn && !won && !myDiscard) {
     const waits = getWaits(player.hand);
     const line = document.createElement('div');
     line.className = 'waits';
@@ -143,12 +288,14 @@ function renderSeat(el, player, game, you) {
   pond.className = 'pond';
   // The discard that can be (or was) called ron on is highlighted.
   const target = game.lastDiscard?.tile ?? (result?.type === 'ron' ? result.tile : null);
-  // The riichi declaration tile lies sideways; tsumogiri discards are a shade darker.
+  // The riichi declaration tile lies sideways; tsumogiri discards are a shade darker, and
+  // discards another player called are darker still.
   player.discards.forEach((t, i) => {
     const classes = [];
     if (target && t.id === target.id) classes.push('claim-tile');
     if (player.riichi?.discardIndex === i) classes.push('riichi-tile');
-    if (player.tsumogiri[i]) classes.push('tsumogiri');
+    if (player.called[i]) classes.push('called-away');
+    else if (player.tsumogiri[i]) classes.push('tsumogiri');
     pond.appendChild(tileEl(t, { extraClass: classes.join(' ') }));
   });
   el.appendChild(pond);
@@ -162,14 +309,19 @@ function breakdownHtml(game, you) {
     const s = result.scores[i];
     const who = seat === you ? 'You' : playerName(seat, game);
     if (s.han === 0) return `<div class="breakdown"><b>${who}:</b> no yaku, 0 points</div>`;
-    const parts = s.yaku.map((y) => `${y.name} ${y.han}`);
-    if (s.dora.dora) parts.push(`Dora ${s.dora.dora}`);
-    if (s.dora.aka) parts.push(`Red five ${s.dora.aka}`);
-    if (s.dora.ura) parts.push(`Ura dora ${s.dora.ura}`);
     const p = s.payment;
     const pay = p.ron !== undefined ? p.ron.toLocaleString()
       : p.all !== undefined ? `${p.all.toLocaleString()} all`
         : `${p.nonDealer.toLocaleString()}/${p.dealer.toLocaleString()}`;
+    // Yakuman replace han and fu; each is listed with its value (a double counts twice).
+    if (s.yakuman) {
+      const parts = s.yaku.map((y) => `${y.name}${y.yakuman > 1 ? ` (${y.yakuman}x)` : ''}`);
+      return `<div class="breakdown"><b>${who}:</b> ${parts.join(' · ')}<br>${s.limit}: ${pay}</div>`;
+    }
+    const parts = s.yaku.map((y) => `${y.name} ${y.han}`);
+    if (s.dora.dora) parts.push(`Dora ${s.dora.dora}`);
+    if (s.dora.aka) parts.push(`Red five ${s.dora.aka}`);
+    if (s.dora.ura) parts.push(`Ura dora ${s.dora.ura}`);
     const value = s.limit ?? `${s.han} han ${s.fu} fu`;
     return `<div class="breakdown"><b>${who}:</b> ${parts.join(' · ')}<br>` +
       `${s.limit ? `${s.han} han ${s.fu} fu · ` : ''}${value}: ${pay}</div>`;
@@ -199,8 +351,12 @@ function statusText(game, you) {
     const from = result.from === you ? 'you' : playerName(result.from, game);
     return `${names.join(' and ')} ${verb} by ron on ${tileLabel(result.tile)} from ${from}`;
   }
+  // The pause after a discard nobody can call looks the same as others deciding on a call.
+  if (game.phase === 'draw') return 'Waiting for other players';
   if (game.phase === 'claim') {
-    if (game.canRon) return `You can ron on ${tileLabel(game.lastDiscard.tile)}`;
+    const tile = tileLabel(game.lastDiscard.tile);
+    const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.chiiOptions.length && 'chii'].filter(Boolean);
+    if (can.length) return `You can ${can.join(' or ')} on ${tile}`;
     return 'Waiting for other players';
   }
   if (game.current === you && choosingRiichi) return 'Riichi: choose a tile to discard';
@@ -210,19 +366,27 @@ function statusText(game, you) {
   return `Waiting for ${playerName(game.current, game)}`;
 }
 
-function render() {
-  const { you, game, connected } = view;
-  const seated = connected.filter(Boolean).length;
-  if (!game?.riichiDiscards?.length) choosingRiichi = false;
+// The end-of-match standings.
+function finalHtml(match, you) {
+  const rows = match.final.ranking.map((r) => `<tr><td>${r.place}</td><td>${nameOf(r.seat)}${r.seat === you ? ' (you)' : ''}</td>` +
+    `<td>${r.score.toLocaleString()}</td></tr>`).join('');
+  const reasons = {
+    'last hand': 'The last hand is over.', 'target reached': 'Someone reached 30,000 in sudden death.',
+    'extension over': 'Sudden death ran out.', bust: 'Someone went below 0.', 'agari-yame': 'The dealer ended it in first place.',
+  };
+  return `<div class="final"><div class="status">Match over</div><div>${reasons[match.final.reason] ?? ''}</div>` +
+    `<table><tr><th>Place</th><th>Player</th><th>Score</th></tr>${rows}</table></div>`;
+}
 
-  if (!game) {
-    Object.values(seatEls).forEach((el) => (el.innerHTML = ''));
-    const role = you === null ? 'Spectating' : `You are Player ${you + 1}`;
-    infoEl.innerHTML = `<div class="status">Waiting for players (${seated}/4)</div><div>${role}</div>`;
-    newHandBtn.disabled = true;
-    riichiBtn.hidden = tsumoBtn.hidden = ronBtn.hidden = passBtn.hidden = true;
+function render() {
+  const { you, game, room, match } = view;
+  if (!room.started) {
+    showScreen('waiting');
+    renderWaiting();
     return;
   }
+  showScreen('table');
+  if (!game?.riichiDiscards?.length) choosingRiichi = false;
 
   // Spectators view from seat 0.
   const pov = you ?? 0;
@@ -230,22 +394,43 @@ function render() {
     renderSeat(seatEls[POSITIONS[(p.seat - pov + 4) % 4]], p, game, you);
   });
 
+  const offline = room.seats.filter((p) => !p.connected).length;
   infoEl.innerHTML = `
+    ${match.over ? finalHtml(match, you) : ''}
     <div class="status">${statusText(game, you)}</div>
     ${breakdownHtml(game, you)}
-    <div>Round: ${WINDS[game.roundWind]}</div>
+    <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
     <div>Wall: ${game.wallCount} tiles left</div>
     <div>Dora indicator: ${game.doraIndicators.map(tileLabel).join(' ')}</div>
     ${game.result?.uraIndicators ? `<div>Ura dora indicator: ${game.result.uraIndicators.map(tileLabel).join(' ')}</div>` : ''}
     ${game.riichiSticks ? `<div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>` : ''}
-    ${you === null ? '<div>Spectating</div>' : ''}
-    ${seated < 4 ? `<div>Players connected: ${seated}/4</div>` : ''}
+    ${game.result?.honbaBonus ? `<div>Honba: +${game.result.honbaBonus.toLocaleString()}</div>` : ''}
+    ${you === null ? '<div>Watching</div>' : ''}
+    ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
+    <div class="room-code">Room ${room.code}</div>
   `;
-  newHandBtn.disabled = you === null || seated < 4;
+  const ended = game.phase === 'ended';
+  nextHandBtn.hidden = !ended || match.over || you === null;
+  rematchBtn.hidden = !match.over || you !== room.hostSeat;
+  leaveTableBtn.hidden = !match.over && you !== null;
   riichiBtn.hidden = !game.riichiDiscards.length;
   riichiBtn.classList.toggle('selected', choosingRiichi);
   tsumoBtn.hidden = !game.canTsumo;
-  ronBtn.hidden = passBtn.hidden = !game.canRon;
+  ronBtn.hidden = !game.canRon;
+  passBtn.hidden = !game.canRon && !game.ponOptions.length && !game.chiiOptions.length;
+
+  // One Pon or Chii button per distinct pair of tiles you could reveal.
+  callOptionsEl.innerHTML = '';
+  const mine = game.players[you]?.hand ?? [];
+  for (const [type, label] of [['pon', 'Pon'], ['chii', 'Chii']]) {
+    for (const pair of game[`${type}Options`]) {
+      const labels = pair.map((id) => tileLabel(mine.find((t) => t.id === id)));
+      const btn = document.createElement('button');
+      btn.textContent = `${label} ${labels.join(' ')}`;
+      btn.addEventListener('click', () => send({ type, tiles: pair }));
+      callOptionsEl.appendChild(btn);
+    }
+  }
 }
 
 riichiBtn.addEventListener('click', () => {
@@ -253,7 +438,8 @@ riichiBtn.addEventListener('click', () => {
   render();
 });
 
-newHandBtn.addEventListener('click', () => send({ type: 'newHand' }));
+nextHandBtn.addEventListener('click', () => send({ type: 'nextHand' }));
+rematchBtn.addEventListener('click', () => send({ type: 'rematch' }));
 tsumoBtn.addEventListener('click', () => send({ type: 'tsumo' }));
 ronBtn.addEventListener('click', () => send({ type: 'ron' }));
 passBtn.addEventListener('click', () => send({ type: 'pass' }));

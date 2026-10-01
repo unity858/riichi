@@ -1,6 +1,6 @@
 // Hand scoring: yaku, han, fu and points. No game state here.
 // Tile kinds use game.js's indexing: m1-9 = 0-8, p1-9 = 9-17, s1-9 = 18-26,
-// winds E S W N = 27-30, dragons Haku Hatsu Chun = 31-33. Yakuman are not scored yet.
+// winds E S W N = 27-30, dragons Haku Hatsu Chun = 31-33.
 
 const SUITS = ['m', 'p', 's', 'z'];
 const WIND_NAMES = ['East', 'South', 'West', 'North'];
@@ -243,14 +243,111 @@ function standardFu(reading, ctx, closed, pinfu) {
   return fu;
 }
 
+// --- Yakuman ---
+// Checked before han and fu: if any yakuman applies, the hand scores only its yakuman, and
+// they stack (two distinct yakuman pay double). Dora don't count. Following Mahjong Soul, a
+// 13-sided kokushi wait, a 9-sided chuuren wait, suuankou on a single wait (tanki) and
+// daisuushi are worth two yakuman each.
+
+// All-green tiles: 2s 3s 4s 6s 8s and Hatsu.
+const GREEN = new Set([19, 20, 21, 23, 25, 32]);
+const isWind = (k) => k >= 27 && k <= 30;
+
+// Yakuman that depend only on which tiles are in the hand.
+function tileYakuman(kinds) {
+  const list = [];
+  if (kinds.every(isHonor)) list.push({ name: 'Tsuuiisou', yakuman: 1 });
+  if (kinds.every(isTerminal)) list.push({ name: 'Chinroutou', yakuman: 1 });
+  if (kinds.every((k) => GREEN.has(k))) list.push({ name: 'Ryuuiisou', yakuman: 1 });
+  return list;
+}
+
+// Chuuren poutou: a closed hand of one suit holding 1112345678999 plus one more tile of that
+// suit. It is the 9-sided wait (junsei, double) when the 13 tiles before the win were exactly
+// 1112345678999.
+function chuuren(closedCounts, winKind, melds) {
+  if (melds.length > 0) return [];
+  for (let suit = 0; suit < 3; suit++) {
+    const c = closedCounts.slice(suit * 9, suit * 9 + 9);
+    if (c.reduce((a, b) => a + b, 0) !== 14) continue;
+    if (c[0] < 3 || c[8] < 3 || c.slice(1, 8).some((n) => n < 1)) continue;
+    const before = [...c];
+    before[winKind - suit * 9]--;
+    const nineSided = before.join() === '3,1,1,1,1,1,1,1,3';
+    return [nineSided ? { name: 'Junsei chuuren poutou (9-sided wait)', yakuman: 2 } : { name: 'Chuuren poutou', yakuman: 1 }];
+  }
+  return [];
+}
+
+// Kokushi musou: one of each terminal and honor plus a pair of one of them, closed. It is the
+// 13-sided wait (double) when the 13 tiles before the win were one of each.
+const TERMINAL_HONOR_KINDS = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
+function kokushi(closedCounts, winKind, melds) {
+  if (melds.length > 0) return null;
+  const total = closedCounts.reduce((a, b) => a + b, 0);
+  const onlyTerminalsHonors = TERMINAL_HONOR_KINDS.reduce((n, k) => n + closedCounts[k], 0) === total;
+  if (total !== 14 || !onlyTerminalsHonors || TERMINAL_HONOR_KINDS.some((k) => closedCounts[k] < 1)) return null;
+  const thirteenSided = closedCounts[winKind] === 2;
+  return thirteenSided ? { name: 'Kokushi musou (13-sided wait)', yakuman: 2 } : { name: 'Kokushi musou', yakuman: 1 };
+}
+
+// Yakuman that depend on how a standard reading splits the hand.
+function readingYakuman(reading, ctx) {
+  const { pair, sets } = reading;
+  const trips = sets.filter((s) => s.type !== 'seq');
+  const list = [];
+  // A triplet completed by ron counts as open, so a shanpon ron is not suuankou.
+  const concealed = trips.filter((t) => !t.open && !(!ctx.tsumo && sets.indexOf(t) === reading.winSet));
+  if (concealed.length === 4) {
+    list.push(reading.wait === 'tanki' ? { name: 'Suuankou tanki (single wait)', yakuman: 2 } : { name: 'Suuankou', yakuman: 1 });
+  }
+  if (trips.filter((t) => isDragon(t.k)).length === 3) list.push({ name: 'Daisangen', yakuman: 1 });
+  const windTrips = trips.filter((t) => isWind(t.k)).length;
+  if (windTrips === 4) list.push({ name: 'Daisuushi', yakuman: 2 }); // supersedes shousuushi
+  else if (windTrips === 3 && isWind(pair)) list.push({ name: 'Shousuushi', yakuman: 1 });
+  if (sets.filter((s) => s.type === 'kan').length === 4) list.push({ name: 'Suukantsu', yakuman: 1 });
+  return list;
+}
+
+// Tenhou (dealer) and chiihou (non-dealer): a tsumo on your first draw, before any call.
+// The game decides the timing and passes it in ctx.
+function situationalYakuman(ctx) {
+  if (!ctx.tsumo) return [];
+  if (ctx.tenhou) return [{ name: 'Tenhou', yakuman: 1 }];
+  if (ctx.chiihou) return [{ name: 'Chiihou', yakuman: 1 }];
+  return [];
+}
+
+const yakumanCount = (list) => list.reduce((n, y) => n + y.yakuman, 0);
+
+function yakumanScore(list, wait, ctx) {
+  const count = yakumanCount(list);
+  const basic = 8000 * count;
+  const payment = payments(basic, ctx);
+  const names = ['', 'Yakuman', 'Double yakuman', 'Triple yakuman', 'Quadruple yakuman'];
+  return {
+    yaku: list,
+    yakuman: count,
+    dora: { dora: 0, aka: 0, ura: 0 },
+    han: null,
+    fu: null,
+    wait,
+    basic,
+    limit: names[count] ?? `${count}x yakuman`,
+    payment,
+    total: payment.ron ?? (payment.all ? payment.all * 3 : payment.dealer + payment.nonDealer * 2),
+  };
+}
+
 // --- Entry point ---
 
-// Scores a won hand, keeping the reading worth the most points.
+// Scores a won hand: yakuman if it has any (score.yakuman is how many, han and fu are null),
+// otherwise the reading worth the most points.
 //   hand:    closed tiles, not including the winning tile
 //   winTile: the tile won on
 //   melds:   [{ type: 'chi' | 'pon' | 'kan', open, tiles }] (open is false for a closed kan)
 //   ctx:     { tsumo, dealer, seatWind, roundWind, doraIndicators, uraIndicators, riichi,
-//              doubleRiichi, ippatsu, haitei, houtei, rinshan, chankan }
+//              doubleRiichi, ippatsu, haitei, houtei, rinshan, chankan, tenhou, chiihou }
 // Returns null if the tiles aren't a complete hand. A hand with no yaku scores 0, and dora
 // only count once there is at least one yaku.
 export function scoreHand(hand, winTile, melds = [], ctx = {}) {
@@ -267,12 +364,33 @@ export function scoreHand(hand, winTile, melds = [], ctx = {}) {
     open: m.open,
   }));
 
+  const allReadings = readings(closedCounts, winKind, meldSets);
+  const sevenPairs = melds.length === 0 && closedCounts.filter((c) => c === 2).length === 7;
+
+  // Yakuman first: the best stack over every way to read the hand.
+  const alwaysYakuman = [...tileYakuman(kinds), ...chuuren(closedCounts, winKind, melds), ...situationalYakuman(ctx)];
+  const shapes = [
+    ...allReadings.map((r) => ({ list: readingYakuman(r, ctx), wait: r.wait })),
+    ...(sevenPairs ? [{ list: [], wait: 'tanki' }] : []),
+  ];
+  const kokushiYakuman = kokushi(closedCounts, winKind, melds);
+  if (kokushiYakuman) shapes.push({ list: [kokushiYakuman], wait: kokushiYakuman.yakuman === 2 ? '13-sided' : 'tanki' });
+  if (shapes.length === 0) return null;
+  let bestYakuman = null;
+  for (const shape of shapes) {
+    const list = [...shape.list, ...alwaysYakuman];
+    if (yakumanCount(list) > 0 && (!bestYakuman || yakumanCount(list) > yakumanCount(bestYakuman.list))) {
+      bestYakuman = { list, wait: shape.wait };
+    }
+  }
+  if (bestYakuman) return yakumanScore(bestYakuman.list, bestYakuman.wait, ctx);
+
   const candidates = [];
   const situational = situationalYaku(ctx, closed, {
     hasKan: melds.some((m) => m.type === 'kan'),
     winKindCount: kinds.filter((k) => k === winKind).length,
   });
-  for (const reading of readings(closedCounts, winKind, meldSets)) {
+  for (const reading of allReadings) {
     const pinfu = isPinfu(reading, ctx, closed);
     candidates.push({
       yaku: [...situational, ...standardYaku(reading, ctx, closed, kinds)],
@@ -281,7 +399,7 @@ export function scoreHand(hand, winTile, melds = [], ctx = {}) {
     });
   }
   // Seven pairs: seven different pairs, closed only. Fixed at 25 fu.
-  if (melds.length === 0 && closedCounts.filter((c) => c === 2).length === 7) {
+  if (sevenPairs) {
     candidates.push({
       yaku: [...situational, { name: 'Chiitoitsu', han: 2 }, ...tileYaku(kinds, closed)],
       fu: 25,

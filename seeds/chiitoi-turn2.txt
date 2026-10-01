@@ -1,0 +1,34 @@
+# Chiitoitsu (seven pairs): tenpai on turn 1, win on turn 2.
+#   Tab 1 (East, dealer): you are dealt 22m 44m 66p 88p 33s plus 5m 3p 7s, and draw a 7s.
+#     Discard the 3p: six pairs and a lone 5m, so you are tenpai waiting on the 5m.
+#   Tabs 2-4: press Space to discard each draw. Nobody can call anything.
+#   Tab 1 draws the 5m: press Tsumo.
+#   Expect: Chiitoitsu 2 + Tanyao 1 + Menzen tsumo 1 = 4 han 25 fu, 3,200 from each player.
+#   Or press Riichi and discard the 3p instead: it is your first discard, so a double
+#   riichi, and the win comes on your next draw, so ippatsu too: Double riichi 2 + Ippatsu 1
+#   + Chiitoitsu 2 + Tanyao 1 + Menzen tsumo 1 = 7 han, haneman, 6,000 from each player.
+#   (Both dora indicators are North, so there are no dora or ura dora.)
+# Run: DEBUG_SEED=seeds/chiitoi-turn2.txt npm start
+#
+# Hands: East 2m2m4m4m5m3p6p6p8p8p3s3s7s, South 6z7m1p1s2s1s3p9s2z6p3m7m6m,
+#        West 6p1z1m2z9s1m5s4s4s1m4p8s0s, North 6m5m3m3z2z7s6s9m3p5z9m3s9p
+
+# deal round 1: East, South, West, North (positions 0-15)
+2m2m4m4m  6z7m1p1s  6p1z1m2z  6m5m3m3z
+# deal round 2: East, South, West, North (positions 16-31)
+5m3p6p6p  2s1s3p9s  9s1m5s4s  2z7s6s9m
+# deal round 3: East, South, West, North (positions 32-47)
+8p8p3s3s  2z6p3m7m  4s1m4p8s  3p5z9m3s
+# one more each: East, South, West, North (48-51)
+7s6m0s9p
+# East's first draw (52): 7s, pairing the 7s
+7s
+# next draws: South, West, North, East (53-56): three tiles nobody can call, then East draws the winning 5m
+9p2p4z5m
+# rest of the live wall (57-121)
+7p1p5p4m8p2s2s9m8m1m9s4p8m1z6m7z8s5p1s3z2m2s5z1s1p0p5z8s6s0m7p6s1z
+5p9m9s2z7p4z3z3p7s6z4m6z4s2p7m9p5s6s2p4p1z7z2m2p8m4s8s3z6m3s7z8m
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 4z
+7z5z9p4p
+4z4z
+3m8p7m7p3m6z5s1p

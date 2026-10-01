@@ -1,0 +1,28 @@
+# Tenhou: the dealer wins on their very first draw.
+#   Tab 1 (East, dealer): you are dealt 123m456p789s23s55m and draw 4s. Press Tsumo.
+#   Expect: Tenhou, a yakuman (it replaces the hand's normal yaku, here menzen tsumo
+#   and pinfu): 16,000 from each player.
+# Run: DEBUG_SEED=seeds/tenhou.txt npm start
+#
+# Hands: East 1m2m3m4p5p6p7s8s9s2s3s5m5m, South 4z3p3z9p7p5z8m7z4p1m9p8p9s,
+#        West 1p6p7z9s1z6z2m0m9m5p4m3m7p, North 5s5z4m1s7s8m5z8m2z3z1z5s4m
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m2m3m4p  4z3p3z9p  1p6p7z9s  5s5z4m1s
+# deal round 2: East, South, West, North (positions 16-31)
+5p6p7s8s  7p5z8m7z  1z6z2m0m  7s8m5z8m
+# deal round 3: East, South, West, North (positions 32-47)
+9s2s3s5m  4p1m9p8p  9m5p4m3m  2z3z1z5s
+# one more each: East, South, West, North (48-51)
+5m9s7p4m
+# East's first draw (52): the winning 4s
+4s
+# next draws: South, West, North, East (53-56)
+7p4s6m4p
+# rest of the live wall (57-121)
+2z0s8s1s6m7s1p8p2s7m6m8p6s3p8s6p2s4s2z2s3s1p1s7p4p1z4z7s9m6z2p2m5m
+0p1p2p9p1m3p8p3m6s4z3s6s6s2p6p7z5s3z9s4s8m2z3z1m6m5p7m3p6z2m9m9m
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 7z
+1z4m5z7m
+4z7z
+8s7m9p1s3s2p6z3m

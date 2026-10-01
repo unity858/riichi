@@ -6,11 +6,24 @@ Riichi mahjong game vibe coded with Claude
 npm start
 ```
 
-Open http://localhost:8080 in 4 browser tabs, one per seat. The first hand is dealt when the 4th tab connects.
+Open http://localhost:8080, pick a name, and create a room: you get a 6-character room code and an invite link (`?room=<code>`). Three more players join with the code or the link; the room's creator (the host) picks the settings and starts the match once all four seats are taken. Several rooms can play at once. Each browser tab is its own player, so you can test alone with 4 tabs; reloading a tab keeps its seat.
+
+Match settings (chosen by the host before the start):
+
+| Setting | Options (default first for the toggles) |
+| --- | --- |
+| Length | East + South (hanchan, default), or East only (tonpuusen) |
+| Bust | on: the match ends as soon as someone is below 0 |
+| Sudden death | on: if nobody has 30,000 after the last hand, play on into the next wind until someone does |
+| Agari-yame | on: in the last hand, a dealer who repeats while in first place ends the match |
+
+Fixed rules: the dealer repeats after a win or when tenpai at an exhaustive draw; honba go up on a repeat and on every exhaustive draw, reset after a non-dealer win, and are worth 300 each to the winner; riichi sticks left at the end go to first place.
+
+`DRAW_DELAY_MS=0 npm start` skips the 2-second pause after uncallable discards, for quicker testing.
 
 ## Testing with a fixed wall (seeds)
 
-`DEBUG_SEED` replaces the random shuffle with a fixed wall order, so every hand deals the same tiles:
+`DEBUG_SEED` replaces the random shuffle with a fixed wall order, so every hand in every room deals the same tiles:
 
 ```
 DEBUG_SEED=seeds/riichi-ippatsu.txt npm start    # a seed file

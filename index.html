@@ -7,7 +7,44 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="table">
+  <!-- Front page: pick a name, then create a room or join one by code. -->
+  <main id="lobby" class="screen" hidden>
+    <h1>Riichi Mahjong</h1>
+    <label class="field">Your name <input id="name" maxlength="20" autocomplete="nickname"></label>
+    <div class="panels">
+      <section class="panel">
+        <h2>Create a room</h2>
+        <div class="settings" id="create-settings"></div>
+        <button id="create">Create room</button>
+      </section>
+      <section class="panel">
+        <h2>Join a room</h2>
+        <label class="field">Room code <input id="join-code" maxlength="6" placeholder="e.g. 3fa9c1" autocomplete="off"></label>
+        <button id="join">Join room</button>
+      </section>
+    </div>
+    <p class="error" id="lobby-error"></p>
+  </main>
+
+  <!-- Waiting room: seats fill up, the host picks settings and starts. -->
+  <main id="waiting" class="screen" hidden>
+    <h1>Room <span id="room-code"></span></h1>
+    <p><button id="copy-link">Copy invite link</button> <span id="copied" hidden>Copied</span></p>
+    <ol id="seat-list"></ol>
+    <p id="spectator-count"></p>
+    <section class="panel">
+      <h2>Settings</h2>
+      <div class="settings" id="room-settings"></div>
+    </section>
+    <p>
+      <button id="start">Start match</button>
+      <button id="leave-waiting">Leave</button>
+    </p>
+    <p class="hint" id="waiting-hint"></p>
+  </main>
+
+  <!-- The table. -->
+  <div id="table" class="screen" hidden>
     <section class="seat seat-top" data-pos="top"></section>
     <section class="seat seat-left" data-pos="left"></section>
     <section id="center">
@@ -16,8 +53,11 @@
         <button id="riichi" hidden>Riichi</button>
         <button id="tsumo" class="win" hidden>Tsumo</button>
         <button id="ron" class="win" hidden>Ron</button>
+        <span id="call-options"></span>
         <button id="pass" hidden>Skip</button>
-        <button id="new-hand">New Hand</button>
+        <button id="next-hand" hidden>Next hand</button>
+        <button id="rematch" hidden>Rematch</button>
+        <button id="leave-table" hidden>Leave</button>
       </div>
       <p class="hint">Click a tile to discard. Press <kbd>Space</kbd> to discard the drawn tile.</p>
     </section>

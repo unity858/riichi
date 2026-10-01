@@ -1,7 +1,8 @@
 // Run with: node test-seed.js
-import { newHand, createWall, draw, discard, tileLabel } from './game.js';
+import fs from 'node:fs';
+import { newHand, createWall, draw, discard, tsumo, declareRiichi, tileLabel } from './game.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
-import { check, done } from './test-helpers.js';
+import { passClaims, check, done } from './test-helpers.js';
 
 const throwsWith = (seed, text) => {
   try {
@@ -53,9 +54,53 @@ check('comments and whitespace are ignored',
   check('the dora indicator is position 126 and the ura indicator 127',
     s.doraIndicators[0].id === wall[126].id && s.uraIndicators[0].id === wall[127].id);
   discard(s, s.players[0].drawn.id);
+  passClaims(s); // the next seat may be offered a chii or ron
   draw(s);
   check('the next seat then draws position 53', s.players[1].drawn.id === wall[53].id);
   check('the fixed wall is copied, not consumed', wall.length === 136);
+}
+
+// --- The seed files in seeds/ play out as their headers say ---
+
+// East discards `firstDiscard` (declaring riichi with it if asked), everyone else discards
+// their draw, then East tsumos. Returns East's score, or null if the scenario breaks.
+function playSeed(file, { firstDiscard = null, riichi = false } = {}) {
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync(file, 'utf8')) });
+  if (firstDiscard) {
+    const east = s.players[0];
+    const tile = [...east.hand, east.drawn].find((t) => tileLabel(t) === firstDiscard);
+    if (riichi) declareRiichi(s, 0, tile.id); else discard(s, tile.id);
+    for (let i = 0; i < 3; i++) {
+      draw(s);
+      if (s.phase !== 'discard') return null;
+      discard(s, s.players[s.current].drawn.id);
+      if (s.phase !== 'draw') return null; // somebody could call
+    }
+    draw(s);
+  }
+  return tsumo(s, 0) ? s.result.scores[0] : null;
+}
+const yakuNames = (sc) => sc?.yaku.map((y) => y.name).sort().join(', ');
+
+{
+  const sc = playSeed('seeds/riichi-ippatsu.txt', { firstDiscard: 'R', riichi: true });
+  check('seeds/riichi-ippatsu.txt: double riichi ippatsu baiman, 8000 all', sc?.limit === 'Baiman' && sc.payment.all === 8000);
+}
+{
+  const sc = playSeed('seeds/tenhou.txt');
+  check('seeds/tenhou.txt: tenhou, 16000 all', yakuNames(sc) === 'Tenhou' && sc.payment.all === 16000);
+}
+{
+  const sc = playSeed('seeds/kokushi-turn2.txt', { firstDiscard: '5m' });
+  check('seeds/kokushi-turn2.txt: kokushi, 16000 all', yakuNames(sc) === 'Kokushi musou' && sc.payment.all === 16000);
+}
+{
+  const sc = playSeed('seeds/chiitoi-turn2.txt', { firstDiscard: '3p' });
+  check('seeds/chiitoi-turn2.txt: chiitoitsu + tanyao + menzen tsumo, 4 han 25 fu, 3200 all',
+    yakuNames(sc) === 'Chiitoitsu, Menzen tsumo, Tanyao' && sc.han === 4 && sc.fu === 25 && sc.payment.all === 3200);
+  const withRiichi = playSeed('seeds/chiitoi-turn2.txt', { firstDiscard: '3p', riichi: true });
+  check('seeds/chiitoi-turn2.txt with riichi: double riichi + ippatsu haneman, 6000 all',
+    withRiichi?.limit === 'Haneman' && withRiichi.han === 7 && withRiichi.payment.all === 6000);
 }
 
 done();

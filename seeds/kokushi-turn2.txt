@@ -1,0 +1,32 @@
+# Kokushi musou (thirteen orphans) on a single wait: tenpai on turn 1, win on turn 2.
+#   Tab 1 (East, dealer): you are dealt 19m19p19s123456z and 5m, and draw an E (1z).
+#     Discard the 5m: you are tenpai, waiting only on Chun (7z).
+#     (Riichi is offered too; either way works.)
+#   Tabs 2-4: press Space to discard each draw. Nobody can call anything.
+#   Tab 1 draws the 7z: press Tsumo.
+#   Expect: Kokushi musou (single wait, so 1 yakuman; not tenhou, since it is not
+#   the first draw): 16,000 from each player.
+# Run: DEBUG_SEED=seeds/kokushi-turn2.txt npm start
+#
+# Hands: East 1m9m1p9p1s9s1z2z3z4z5z6z5m, South 7p2m8m5z7m6p3s8m2p5z2m5p1s,
+#        West 6z1s2s7m5p7m7m8s3m3z7s2p9m, North 8p8p3s2z4m0p2m2s9m1z8p6s4s
+
+# deal round 1: East, South, West, North (positions 0-15)
+1m9m1p9p  7p2m8m5z  6z1s2s7m  8p8p3s2z
+# deal round 2: East, South, West, North (positions 16-31)
+1s9s1z2z  7m6p3s8m  5p7m7m8s  4m0p2m2s
+# deal round 3: East, South, West, North (positions 32-47)
+3z4z5z6z  2p5z2m5p  3m3z7s2p  9m1z8p6s
+# one more each: East, South, West, North (48-51)
+5m1s9m4s
+# East's first draw (52): E, making the pair
+1z
+# next draws: South, West, North, East (53-56): three tiles nobody can call, then East draws the winning 7z
+8s3z4m7z
+# rest of the live wall (57-121)
+7s0m1z9p2s2m9p5s7z6p2z8p4p9s0s7s4s4p3p4m6m3z9s6s4z5s1s6p7z6p8m6s6z
+4p6m3m4s4m1m6s1m7p3p7p7z4z2s3m4s5m1m3s8s5p6m2z3p3m3p4p2p9m6m2p5s
+# dead wall (122-135): 126 = dora indicator 4z, 127 = ura indicator 5m
+1p8s1p3s
+4z5m
+7p7s6z9s5z9p1p8m
