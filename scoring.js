@@ -158,6 +158,12 @@ function isPinfu(reading, ctx, closed) {
     !isDragon(pair) && pair !== seat && pair !== round;
 }
 
+// Yaku rebalance (a room option, ctx.rebalance): sanshoku doukou is 3 han, ryanpeikou 6,
+// sankantsu a yakuman, suukantsu a double yakuman, the new shoutate SHOUTATE_HAN han, the new
+// renhou a flat RENHOU_HAN (see scoreHand), and nagashi mangan (in game.js) a baiman.
+const SHOUTATE_HAN = 2;
+const RENHOU_HAN = 8;
+
 function standardYaku(reading, ctx, closed, kinds) {
   const { pair, sets } = reading;
   const { seat, round } = yakuhaiKinds(ctx);
@@ -179,7 +185,7 @@ function standardYaku(reading, ctx, closed, kinds) {
     const bySeq = {};
     for (const s of seqs) bySeq[s.k] = (bySeq[s.k] ?? 0) + 1;
     const pairsOfSeqs = Object.values(bySeq).reduce((n, c) => n + Math.floor(c / 2), 0);
-    if (pairsOfSeqs === 2) yaku.push({ name: 'Ryanpeikou', han: 3 });
+    if (pairsOfSeqs === 2) yaku.push({ name: 'Ryanpeikou', han: ctx.rebalance ? 6 : 3 });
     else if (pairsOfSeqs === 1) yaku.push({ name: 'Iipeikou', han: 1 });
   }
 
@@ -210,11 +216,19 @@ function standardYaku(reading, ctx, closed, kinds) {
   if (concealed.length >= 3) yaku.push({ name: 'Sanankou', han: 2 });
   for (let r = 0; r < 9; r++) {
     if (has('trip', r) && has('trip', 9 + r) && has('trip', 18 + r)) {
-      yaku.push({ name: 'Sanshoku doukou', han: 2 });
+      yaku.push({ name: 'Sanshoku doukou', han: ctx.rebalance ? 3 : 2 });
       break;
     }
   }
-  if (sets.filter((s) => s.type === 'kan').length === 3) yaku.push({ name: 'Sankantsu', han: 2 });
+  // Shoutate (yaku rebalance only): triplets of the same number in two suits and a pair of it
+  // in the third.
+  if (ctx.rebalance && pair < 27) {
+    const r = pair % 9;
+    const otherSuits = [0, 1, 2].filter((suit) => suit !== Math.floor(pair / 9));
+    if (otherSuits.every((suit) => has('trip', suit * 9 + r))) yaku.push({ name: 'Shoutate', han: SHOUTATE_HAN });
+  }
+  // With the yaku rebalance, sankantsu is a yakuman instead (see readingYakuman).
+  if (!ctx.rebalance && sets.filter((s) => s.type === 'kan').length === 3) yaku.push({ name: 'Sankantsu', han: 2 });
   if (trips.filter((t) => isDragon(t.k)).length === 2 && isDragon(pair)) yaku.push({ name: 'Shousangen', han: 2 });
 
   return [...yaku, ...tileYaku(kinds, closed)];
@@ -305,7 +319,9 @@ function readingYakuman(reading, ctx) {
   const windTrips = trips.filter((t) => isWind(t.k)).length;
   if (windTrips === 4) list.push({ name: 'Daisuushi', yakuman: 2 }); // supersedes shousuushi
   else if (windTrips === 3 && isWind(pair)) list.push({ name: 'Shousuushi', yakuman: 1 });
-  if (sets.filter((s) => s.type === 'kan').length === 4) list.push({ name: 'Suukantsu', yakuman: 1 });
+  const kans = sets.filter((s) => s.type === 'kan').length;
+  if (kans === 4) list.push({ name: 'Suukantsu', yakuman: ctx.rebalance ? 2 : 1 });
+  if (kans === 3 && ctx.rebalance) list.push({ name: 'Sankantsu', yakuman: 1 });
   return list;
 }
 
@@ -347,10 +363,34 @@ function yakumanScore(list, wait, ctx) {
 //   winTile: the tile won on
 //   melds:   [{ type: 'chi' | 'pon' | 'kan', open, tiles }] (open is false for a closed kan)
 //   ctx:     { tsumo, dealer, seatWind, roundWind, doraIndicators, uraIndicators, riichi,
-//              doubleRiichi, ippatsu, haitei, houtei, rinshan, chankan, tenhou, chiihou }
+//              doubleRiichi, ippatsu, haitei, houtei, rinshan, chankan, tenhou, chiihou,
+//              rebalance (the yaku rebalance room option), renhou }
 // Returns null if the tiles aren't a complete hand. A hand with no yaku scores 0, and dora
 // only count once there is at least one yaku.
+//
+// Renhou (with the yaku rebalance: a ron before your first draw, ctx.renhou) is a flat
+// RENHOU_HAN with no other yaku and no dora. It doesn't combine with anything, so if the hand
+// is worth more without it (e.g. a yakuman), that score is used instead.
 export function scoreHand(hand, winTile, melds = [], ctx = {}) {
+  const normal = scoreHandWithoutRenhou(hand, winTile, melds, ctx);
+  if (!normal || !ctx.renhou || !ctx.rebalance || ctx.tsumo) return normal;
+  const basic = basicPoints(RENHOU_HAN, 0);
+  const payment = payments(basic, ctx);
+  const renhou = {
+    yaku: [{ name: 'Renhou', han: RENHOU_HAN }],
+    dora: { dora: 0, aka: 0, ura: 0 },
+    han: RENHOU_HAN,
+    fu: null,
+    wait: normal.wait,
+    basic,
+    limit: LIMIT_NAMES[basic],
+    payment,
+    total: payment.ron,
+  };
+  return normal.total > renhou.total ? normal : renhou;
+}
+
+function scoreHandWithoutRenhou(hand, winTile, melds, ctx) {
   const closedTiles = [...hand, winTile];
   const allTiles = [...closedTiles, ...melds.flatMap((m) => m.tiles)];
   const closed = melds.every((m) => !m.open);

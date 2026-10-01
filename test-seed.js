@@ -122,6 +122,7 @@ const yakuNames = (sc) => sc?.yaku.map((y) => y.name).sort().join(', ');
   // Closed kan on the first draw, then a tsumo on the replacement tile.
   const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/kan.txt', 'utf8')) });
   declareKan(s, 0, 0);
+  draw(s);
   const sc = tsumo(s, 0) ? s.result.scores[0] : null;
   check('seeds/kan.txt: closed kan, then rinshan kaihou + menzen tsumo, 2 han 60 fu, 2000 all',
     yakuNames(sc) === 'Menzen tsumo, Rinshan kaihou' && sc.han === 2 && sc.fu === 60 && sc.payment.all === 2000);
@@ -132,6 +133,7 @@ const yakuNames = (sc) => sc?.yaku.map((y) => y.name).sort().join(', ');
 for (const riichi of [false, true]) {
   const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/kan-manual.txt', 'utf8')) });
   declareKan(s, 0, 33);
+  draw(s);
   const replacement = s.players[0].drawn.id;
   if (riichi) declareRiichi(s, 0, replacement); else discard(s, replacement);
   for (let i = 0; i < 3 && s.phase === 'draw'; i++) {

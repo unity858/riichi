@@ -26,7 +26,7 @@ check('settings keep only valid values', JSON.stringify(normalizeSettings({ leng
   check('a non-dealer win resets honba', handLabel(m) === 'East 4' && m.honba === 0);
   recordHand(m, win([0], even));
   check('after East 4 the round wind advances: South 1, dealt by the first seat again', handLabel(m) === 'South 1' && m.dealer === 0);
-  check('handSettings is what newHand needs', JSON.stringify(handSettings(m)) === JSON.stringify({ dealer: 0, roundWind: 1, scores: even, riichiSticks: 0, honba: 0 }));
+  check('handSettings is what newHand needs', JSON.stringify(handSettings(m)) === JSON.stringify({ dealer: 0, roundWind: 1, scores: even, riichiSticks: 0, honba: 0, rules: { yakuRebalance: false } }));
 }
 
 {

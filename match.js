@@ -11,6 +11,7 @@ export const DEFAULT_SETTINGS = {
   bust: true, // the match ends as soon as someone is below 0 points
   extension: true, // if nobody has TARGET_SCORE after the last hand, play on into the next wind (sudden death)
   agariYame: true, // in the last hand, a dealer who repeats while in first place ends the match
+  yakuRebalance: false, // house yaku values: see scoring.js (and nagashi mangan in game.js)
 };
 export const TARGET_SCORE = 30000;
 const LENGTHS = { east: 1, south: 2 }; // number of round winds in the regular match
@@ -20,7 +21,7 @@ export function normalizeSettings(input = {}) {
   const s = { ...DEFAULT_SETTINGS };
   if (input && typeof input === 'object') {
     if (input.length in LENGTHS) s.length = input.length;
-    for (const key of ['bust', 'extension', 'agariYame']) if (typeof input[key] === 'boolean') s[key] = input[key];
+    for (const key of ['bust', 'extension', 'agariYame', 'yakuRebalance']) if (typeof input[key] === 'boolean') s[key] = input[key];
   }
   return s;
 }
@@ -49,7 +50,7 @@ export function handLabel(match) {
 // What newHand needs for the next hand.
 export function handSettings(match) {
   const { dealer, roundWind, scores, riichiSticks, honba } = match;
-  return { dealer, roundWind, scores, riichiSticks, honba };
+  return { dealer, roundWind, scores, riichiSticks, honba, rules: { yakuRebalance: match.settings.yakuRebalance } };
 }
 
 // Seats from first to last place. Equal scores rank by turn order from the starting dealer.

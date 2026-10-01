@@ -91,7 +91,7 @@ const PON_5M = '55m123p456p789s12z';
 
 {
   // Seat 2 can pon the 3m; seat 3 can ron it (12m waits on 3m).
-  const s = afterDiscard('3m', { 2: '33m123p456p789s12z', 3: '12m456p789s123s55z' });
+  const s = afterDiscard('3m', { 2: '33m123p456p789s12z', 3: '12m456p789s55s555z' });
   claim(s, 2, 'pon', ponOptions(s, 2)[0]);
   check('a pon waits for players who can ron', s.phase === 'claim' && canRon(s, 3));
   claim(s, 3, 'ron');

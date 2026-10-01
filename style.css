@@ -68,7 +68,10 @@ body {
 
 button.win { font-weight: bold; background: #d32f2f; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; }
 
-.seat-name { font-size: 0.9em; font-weight: bold; }
+.seat-name { font-size: 0.9em; font-weight: normal; }
+.seat.active .seat-name { font-weight: bold; } /* whose turn it is */
+.seat-name.furiten { font-style: italic; } /* your own name line while you are furiten */
+.seat-name .no-yaku { color: #e07000; }
 .seat-name .dealer { color: #d32f2f; }
 .seat-name .delta.gain { color: #2e7d32; }
 .seat-name .delta.loss { color: #c62828; }
@@ -170,3 +173,10 @@ button.selected { outline: 2px solid #1565c0; }
 .dora-label { font-weight: bold; font-size: 0.9em; text-align: right; }
 .dora-row { display: flex; gap: 3px; }
 .dora-row .tile { width: 28px; height: 38px; font-size: 12px; }
+
+/* Rule details under the settings, folded away until clicked. */
+.rule-details { font-size: 0.85em; margin-top: 4px; }
+.rule-details summary { cursor: pointer; color: #1565c0; }
+.rule-details p { margin: 6px 0; }
+.rule-details table { border-collapse: collapse; margin: 4px 0; }
+.rule-details td, .rule-details th { border: 1px solid #ccc; padding: 2px 6px; text-align: left; }

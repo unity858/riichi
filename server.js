@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
-  canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions,
+  canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions, yakulessTenpai,
   autoDiscardDue, furitenStatus, createWall, checkIntegrity,
 } from './game.js';
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
@@ -27,6 +27,9 @@ const AUTO_DISCARD_MS = 1000;
 // makes everyone wait while they decide, so without this pause the wait itself would show
 // that someone had an option. DRAW_DELAY_MS overrides it (e.g. 0 for automated tests).
 const DRAW_DELAY_MS = Number(process.env.DRAW_DELAY_MS ?? 2000);
+// Pause after a kan, before the replacement draw. The pause when an added kan could be robbed
+// (chankan) then looks like any other kan's.
+const KAN_DRAW_MS = 500;
 // A room with nobody connected is deleted after this long.
 const EMPTY_ROOM_MS = 10 * 60 * 1000;
 
@@ -99,17 +102,33 @@ function gameView(state, seat) {
   const revealed = state.result?.winners ?? state.result?.revealed ?? [];
   const visible = (p) => p.seat === seat || revealed.includes(p.seat);
   const me = seat !== null && seat >= 0 ? seat : null;
+  // While players decide on a discard (or a kan that could be robbed), only they see it: to
+  // everyone else this looks exactly like the pause before the next draw, so nothing shows
+  // that someone could call.
+  const deciding = state.phase === 'claim' && me !== null &&
+    (canRon(state, me) || ponOptions(state, me).length > 0 || chiiOptions(state, me).length > 0 || openKanOptions(state, me).length > 0);
+  const hidden = state.phase === 'claim' && !deciding;
+  // Hidden decisions look like the pause they replace: before a draw, or (for a kan that could
+  // be robbed) before the replacement draw.
+  const shownPhase = hidden ? (state.lastDiscard.chankan ? 'rinshan' : 'draw') : state.phase;
+  // Whose turn to show: the player discarding, and after a discard still that player until
+  // the tile is called or skipped and the next player draws. It is the same whether or not
+  // someone could call the tile (or rob a kan, where the kan player keeps it).
+  let turn = state.current;
+  if (state.phase === 'claim') turn = state.lastDiscard.from;
+  else if (state.phase === 'draw') turn = state.discardLog.at(-1)?.from ?? state.current;
   return {
     dealer: state.dealer,
     current: state.current,
-    phase: state.phase,
+    turn,
+    phase: shownPhase,
     roundWind: state.roundWind,
     scores: state.scores,
     riichiSticks: state.riichiSticks,
     honba: state.honba,
     wallCount: state.wall.length,
     doraIndicators: state.doraIndicators,
-    lastDiscard: state.lastDiscard,
+    lastDiscard: hidden ? null : state.lastDiscard, // the outlined tile, only for those who can call it
     result: state.result,
     canTsumo: me !== null && canTsumo(state, me),
     canRon: me !== null && canRon(state, me),
@@ -121,6 +140,7 @@ function gameView(state, seat) {
     riichiDiscards: me !== null ? riichiDiscards(state, me) : [],
     autoDiscarding: me !== null && state.current === me && autoDiscardDue(state),
     furiten: me !== null ? furitenStatus(state, me) : null, // your own only: it reveals your waits
+    noYaku: me !== null && yakulessTenpai(state, me), // your own only, likewise
     players: state.players.map((p) => ({
       seat: p.seat,
       discards: p.discards,
@@ -209,8 +229,20 @@ function drawAfterPause(room) {
   }, DRAW_DELAY_MS);
 }
 
+// After a kan stands, the replacement tile is drawn once KAN_DRAW_MS has passed. The timer
+// checks it is still the same hand, still waiting for it.
+function scheduleRinshan(room) {
+  const hand = room.state;
+  if (!hand || hand.phase !== 'rinshan') return;
+  setTimeout(() => {
+    if (room.state !== hand || hand.phase !== 'rinshan') return;
+    draw(hand);
+    update(room);
+  }, KAN_DRAW_MS);
+}
+
 // Sends everyone the new state, records a hand that just ended in the match, and starts the
-// auto-discard timer if it applies.
+// auto-discard and replacement-draw timers if they apply.
 function update(room) {
   if (room.state?.phase === 'ended' && !room.state.recorded) {
     room.state.recorded = true;
@@ -218,6 +250,7 @@ function update(room) {
   }
   broadcast(room);
   scheduleAutoDiscard(room);
+  scheduleRinshan(room);
 }
 
 // Every hand's full seed is logged, so any hand can be replayed with DEBUG_SEED.
@@ -349,8 +382,8 @@ function handle(ws, msg) {
   } else if (['ron', 'kan', 'pon', 'chii', 'pass'].includes(msg.type)) {
     if (claim(state, seat, msg.type, Array.isArray(msg.tiles) ? msg.tiles : null)) {
       // If everyone passed, the next player draws now: the decisions already took time.
-      // Nothing is drawn after a call.
-      draw(state);
+      // Nothing is drawn after a pon or chii; after a kan the replacement comes after a pause.
+      if (state.phase === 'draw') draw(state);
       update(room);
     }
   }

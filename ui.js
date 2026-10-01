@@ -92,8 +92,37 @@ const SETTING_FIELDS = [
   { key: 'bust', label: 'End the match when someone goes below 0' },
   { key: 'extension', label: 'Sudden death: if nobody has 30,000 at the end, play on into the next wind' },
   { key: 'agariYame', label: 'Agari-yame: a last-hand dealer in first place may end the match' },
+  { key: 'yakuRebalance', label: 'Yaku rebalance (house rules)' },
 ];
-const DEFAULT_SETTINGS = { length: 'south', bust: true, extension: true, agariYame: true };
+const DEFAULT_SETTINGS = { length: 'south', bust: true, extension: true, agariYame: true, yakuRebalance: false };
+
+// The rule details shown under the settings, folded away until clicked.
+const RULE_DETAILS = `
+  <p><b>Length.</b> East only: East 1 to East 4. East + South: East 1 to South 4. The dealer
+  repeats after winning or being tenpai at an exhaustive draw (or an abortive draw), so a
+  round can have more hands than this.</p>
+  <p><b>Bust.</b> The match ends as soon as anyone's score is below 0.</p>
+  <p><b>Sudden death.</b> If nobody has 30,000 when the last hand ends, play continues into the
+  next wind (South for an East-only match, West for East + South) and ends as soon as someone
+  has 30,000 after a hand, or when that wind is over.</p>
+  <p><b>Agari-yame.</b> In the last hand, if the dealer repeats while in first place (and, with
+  sudden death on, with at least 30,000), the match ends instead of continuing.</p>
+  <p><b>Yaku rebalance.</b> House values for a few yaku:</p>
+  <table>
+    <tr><th>Yaku</th><th>Standard</th><th>Rebalanced</th></tr>
+    <tr><td>Nagashi mangan</td><td>mangan</td><td>baiman (still combines with nothing)</td></tr>
+    <tr><td>Sankantsu (three kans)</td><td>2 han</td><td>yakuman</td></tr>
+    <tr><td>Suukantsu (four kans)</td><td>yakuman</td><td>double yakuman</td></tr>
+    <tr><td>Sanshoku doukou</td><td>2 han</td><td>3 han</td></tr>
+    <tr><td>Ryanpeikou</td><td>3 han</td><td>6 han (iipeikou is still 1)</td></tr>
+    <tr><td>Renhou: a ron before your first draw, with no calls before it (not the dealer)</td><td>(none)</td>
+      <td>8 han (baiman), counting no other yaku or dora; if the hand is worth more without it, that score is used</td></tr>
+    <tr><td>Shoutate: triplets of one number in two suits and a pair of it in the third</td><td>(none)</td><td>2 han</td></tr>
+  </table>
+  <p><b>Always on.</b> Honba go up on a dealer repeat and on every draw, reset after a
+  non-dealer win, and add 300 each to a win. Riichi sticks left at the end go to first place.
+  Open tanyao, double ron, and Mahjong Soul's double yakuman (13-sided kokushi, 9-sided
+  chuuren, suuankou tanki, daisuushi) are on. A win needs at least one yaku.</p>`;
 
 // Fills container with the settings; editable ones call onChange with the new settings.
 function renderSettings(container, settings, editable, onChange) {
@@ -118,7 +147,15 @@ function renderSettings(container, settings, editable, onChange) {
     });
     container.appendChild(row);
   }
+  // The settings are redrawn on every update, so remember whether the details were open.
+  const details = document.createElement('details');
+  details.className = 'rule-details';
+  details.innerHTML = `<summary>Click for details</summary>${RULE_DETAILS}`;
+  details.open = !!detailsOpen[container.id];
+  details.addEventListener('toggle', () => (detailsOpen[container.id] = details.open));
+  container.appendChild(details);
 }
+const detailsOpen = {};
 
 let createSettings = { ...DEFAULT_SETTINGS };
 const drawCreateSettings = () => renderSettings($('create-settings'), createSettings, true, (s) => {
@@ -203,7 +240,9 @@ function seatWind(seat, dealer) {
   return WINDS[(seat - dealer + 4) % 4];
 }
 
-const nameOf = (seat) => view.room.seats[seat]?.name ?? `Player ${seat + 1}`;
+// Names are chosen by players, so they are escaped before going into any HTML.
+const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const nameOf = (seat) => escapeHtml(view.room.seats[seat]?.name ?? `Player ${seat + 1}`);
 
 function playerName(seat, game) {
   return `${seatWind(seat, game.dealer)} (${nameOf(seat)})`;
@@ -211,14 +250,23 @@ function playerName(seat, game) {
 
 function renderSeat(el, player, game, you) {
   el.innerHTML = '';
-  el.classList.toggle('active', game.current === player.seat && game.phase === 'discard');
+  // The player whose turn it is gets a bold name line and a highlighted seat. After a discard
+  // it stays on the discarder until the tile is called or skipped (see game.turn from the
+  // server), which looks the same whether or not anyone could call it.
+  el.classList.toggle('active', game.turn === player.seat && game.phase !== 'ended');
   const result = game.result;
   const won = result?.winners?.includes(player.seat);
   el.classList.toggle('winner', !!won);
 
   const name = document.createElement('div');
   name.className = 'seat-name';
-  const who = player.seat === you ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
+  // Your own name line is italic while you are furiten, and your name gets an orange
+  // "(no yaku)" when you are tenpai without a yaku to ron with. Both only for yourself: they
+  // would give away your waits.
+  const f = player.seat === you ? game.furiten : null;
+  name.classList.toggle('furiten', !!(f && (f.discard || f.temporary || f.riichi)));
+  const noYaku = player.seat === you && game.noYaku ? ' <span class="no-yaku">(no yaku)</span>' : '';
+  const who = player.seat === you ? `${nameOf(player.seat)} (you)${noYaku}` : nameOf(player.seat);
   const offline = view.room.seats[player.seat]?.connected ? '' : ' (offline)';
   // The dealer's seat wind (always E) is shown in red.
   const wind = seatWind(player.seat, game.dealer);
@@ -297,7 +345,8 @@ function renderSeat(el, player, game, you) {
 
   const pond = document.createElement('div');
   pond.className = 'pond';
-  // The discard that can be (or was) called ron on is highlighted.
+  // The discard you can call is outlined (only players who can call it are sent it), and so is
+  // the tile a hand was won on by ron.
   const target = game.lastDiscard?.tile ?? (result?.type === 'ron' ? result.tile : null);
   // The riichi declaration tile lies sideways; tsumogiri discards are a shade darker, and
   // discards another player called are darker still.
@@ -368,14 +417,15 @@ function statusText(game, you) {
     const from = result.from === you ? 'you' : playerName(result.from, game);
     return `${names.join(' and ')} ${verb} by ron${result.chankan ? ' (robbing a kan)' : ''} on ${tileLabel(result.tile)} from ${from}`;
   }
-  // The pause after a discard nobody can call looks the same as others deciding on a call.
-  if (game.phase === 'draw') return 'Waiting for other players';
+  // Whose turn it is shows as a bold name line, not here. The pause before a draw (which is
+  // also how others deciding on a call look) has no status text.
+  if (game.phase === 'draw') return '';
+  if (game.phase === 'rinshan') return game.current === you ? 'Kan: drawing a replacement tile…' : '';
   if (game.phase === 'claim') {
     const tile = tileLabel(game.lastDiscard.tile);
-    if (game.lastDiscard.chankan) return game.canRon ? `You can rob the kan: ron on ${tile}` : 'Waiting for other players';
+    if (game.lastDiscard.chankan) return game.canRon ? `You can rob the kan: ron on ${tile}` : '';
     const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.openKanOptions.length && 'kan', game.chiiOptions.length && 'chii'].filter(Boolean);
-    if (can.length) return `You can ${can.join(' or ')} on ${tile}`;
-    return 'Waiting for other players';
+    return can.length ? `You can ${can.join(' or ')} on ${tile}` : '';
   }
   if (game.current === you && choosingRiichi) return 'Riichi: choose a tile to discard';
   if (game.current === you && game.autoDiscarding) return 'Riichi: discarding…';
@@ -384,7 +434,7 @@ function statusText(game, you) {
     return `Riichi: ${options}, or click the drawn tile to pass`;
   }
   if (game.current === you) return game.canTsumo ? 'Your turn: tsumo or discard' : 'Your turn: discard a tile';
-  return `Waiting for ${playerName(game.current, game)}`;
+  return '';
 }
 
 // The end-of-match standings.
@@ -431,11 +481,11 @@ function render() {
   const offline = room.seats.filter((p) => !p.connected).length;
   infoEl.innerHTML = `
     ${match.over ? finalHtml(match, you) : ''}
-    <div class="status">${statusText(game, you)}</div>
+    ${(() => { const status = statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
     ${breakdownHtml(game, you)}
     <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
     <div>Wall: ${game.wallCount} tiles left</div>
-    ${game.riichiSticks ? `<div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>` : ''}
+    <div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>
     ${game.result?.honbaBonus ? `<div>Honba: +${game.result.honbaBonus.toLocaleString()}</div>` : ''}
     ${you === null ? '<div>Watching</div>' : ''}
     ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}

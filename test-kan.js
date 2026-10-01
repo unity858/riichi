@@ -17,11 +17,19 @@ function turn(hand, drawn, more = {}) {
 // --- Closed kan ---
 {
   const s = turn('111m456p789s23s55m', '1m');
+  declareKan(s, 0, 0);
+  check('after a kan the hand waits for the replacement draw (the server pauses there)',
+    s.phase === 'rinshan' && s.current === 0 && !s.players[0].drawn && draw(s) && s.players[0].drawn && s.phase === 'discard');
+}
+
+{
+  const s = turn('111m456p789s23s55m', '1m');
   const [wall0, dead0] = liveDead(s);
   const replacement = s.deadWall[0];
   const kanIndicator = s.deadWall[6];
   check('a closed kan is offered with four in hand', kanOptions(s, 0).map((o) => `${o.type} ${o.kind}`).join() === 'ankan 0');
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   const [meld] = s.players[0].melds;
   check('it makes a closed meld of the four tiles', meld.type === 'kan' && meld.kanType === 'ankan' && !meld.open &&
     labels(meld.tiles) === '1m 1m 1m 1m' && s.players[0].hand.length === 10);
@@ -37,6 +45,7 @@ function turn(hand, drawn, more = {}) {
   const s = turn('111m456p789s23s55m', '1m');
   s.deadWall[0] = parse('4s', 7000)[0];
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   check('winning on the replacement tile can tsumo', canTsumo(s, 0));
   s.players[0].discards = parse('9p', 1950); // not the first draw
   tsumo(s, 0);
@@ -58,6 +67,7 @@ const withPon = (s, seat, ponTiles, from = 3) => {
   s.players[0].hand = parse('456p789s23s55m9p', 1000).slice(0, 10);
   check('an added kan is offered for the fourth tile of a pon', kanOptions(s, 0).some((o) => o.type === 'kakan' && o.kind === 31));
   declareKan(s, 0, 31);
+  draw(s); // the replacement tile, after the server's short pause
   const meld = s.players[0].melds[0];
   check('nobody can rob it: the pon becomes a kan and the player draws a replacement',
     meld.type === 'kan' && meld.kanType === 'kakan' && meld.tiles.length === 4 && !!meld.addedId && s.players[0].rinshan);
@@ -73,6 +83,7 @@ function addedKanOf6m() {
   s.players[0].hand = parse('456p789s23s55m9p', 1000).slice(0, 10);
   s.players[0].discards = parse('1p', 1960);
   declareKan(s, 0, 5);
+  draw(s); // the replacement tile, after the server's short pause
   return s;
 }
 {
@@ -89,6 +100,7 @@ function addedKanOf6m() {
 {
   const s = addedKanOf6m();
   claim(s, 1, 'pass');
+  draw(s);
   check('if nobody robs it, the kan goes ahead', s.players[0].melds[0].type === 'kan' && s.players[0].rinshan && s.current === 0);
 }
 
@@ -96,6 +108,7 @@ function addedKanOf6m() {
   // Seat 1 is kokushi tenpai on 1m; seat 2 waits on 1m with an ordinary hand. Seat 0 closed-kans 1m.
   const s = turn('111m456p789s23s55m', '1m', { hands: { 1: '9m19p19s12345677z', 2: '23m456p789s23455s' } });
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   check('only kokushi may rob a closed kan', s.phase === 'claim' && canRon(s, 1) && !canRon(s, 2));
   claim(s, 1, 'ron');
   check('and it scores as kokushi with chankan', s.result.scores[0].yaku.some((y) => y.name.startsWith('Kokushi')) && s.result.chankan);
@@ -110,6 +123,7 @@ function addedKanOf6m() {
   check('three in hand offer an open kan on the discard', openKanOptions(s, 2).length === 1 && chiiOptions(s, 1).length > 0);
   claim(s, 1, 'chii', chiiOptions(s, 1)[0]);
   claim(s, 2, 'kan', openKanOptions(s, 2)[0]);
+  draw(s);
   const meld = s.players[2].melds[0];
   check('an open kan beats a chii', s.players[1].melds.length === 0 && meld?.type === 'kan' && meld.kanType === 'daiminkan');
   check('it is an open meld of four with the called tile, and the caller draws a replacement',
@@ -118,7 +132,7 @@ function addedKanOf6m() {
   check('its indicator waits for the caller\'s discard', s.doraIndicators.length === 1 && s.pendingKanDora === 1);
   // Seat 3 waits on 9p; seat 2 discards the 9p it drew... we give it one.
   s.players[2].drawn = parse('9p', 7100)[0];
-  s.players[3].hand = parse('123m456p789s78p11z', 1300);
+  s.players[3].hand = parse('123m456p789s78p55m', 1300); // pinfu on 6p/9p
   discard(s, s.players[2].drawn.id);
   check('the indicator is revealed at that discard, before the ron on it', s.doraIndicators.length === 2 && canRon(s, 3));
   passClaims(s, 3);
@@ -127,7 +141,7 @@ function addedKanOf6m() {
 }
 
 {
-  const s = turn('1234567m2468p13s', '5m', { hands: { 2: '555m123p456p78s12z', 3: '34m123p456p789s11z' } });
+  const s = turn('1234567m2468p13s', '5m', { hands: { 2: '555m123p456p78s12z', 3: '34m123p456p789s55p' } });
   discard(s, s.players[0].drawn.id);
   claim(s, 2, 'kan', openKanOptions(s, 2)[0]);
   passClaims(s, 3); // seat 1 could chii the 5m
@@ -176,6 +190,7 @@ function addedKanOf6m() {
   const s = turn('111m456p789s23s55m', '1m');
   s.players[2].riichi = { turn: -1, discardIndex: 0, double: false, ippatsu: true };
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   check('any kan, even a closed one, ends ippatsu and the uninterrupted first go-around', !s.players[2].riichi.ippatsu && s.callMade);
 }
 
@@ -195,6 +210,7 @@ function addedKanOf6m() {
   s.players[3].hand = s.players[3].hand.slice(0, 10);
   s.doraIndicators = [s.deadWall[4], s.deadWall[6], s.deadWall[8], s.deadWall[10]];
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   check('the fourth kan is allowed, a fifth is not', s.players[0].melds.length === 1 && kanOptions(s, 0).length === 0);
   discard(s, s.players[0].drawn.id);
   passClaims(s);
@@ -208,8 +224,10 @@ function addedKanOf6m() {
   const s = turn('111m999p789s23s55m', '1m');
   s.deadWall[0] = parse('9p', 7000)[0];
   declareKan(s, 0, 0);
+  draw(s); // the replacement tile, after the server's short pause
   check('a replacement tile can make another kan', kanOptions(s, 0).some((o) => o.kind === 17));
   declareKan(s, 0, 17);
+  draw(s); // the replacement tile, after the server's short pause
   check('two closed kans reveal two indicators, and two replacement draws shorten the live wall by two',
     s.doraIndicators.length === 3 && s.rinshanUsed === 2 && s.deadWall.filter(Boolean).length === 14 && checkIntegrity(s));
 }
@@ -223,7 +241,9 @@ function addedKanOf6m() {
   s.deadWall[0] = parse('1p', 7000)[0];
   claim(s, 2, 'kan', openKanOptions(s, 2)[0]);
   passClaims(s);
+  draw(s);
   declareKan(s, 2, 9);
+  draw(s); // the replacement tile, after the server's short pause
   check('a second kan reveals the first kan\'s pending indicator, then its own', s.doraIndicators.length === 3 && s.pendingKanDora === 0);
 }
 

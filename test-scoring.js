@@ -1,5 +1,5 @@
 // Run with: node test-scoring.js
-import { newHand, draw, discard, tsumo, claim, checkIntegrity, STARTING_SCORE } from './game.js';
+import { newHand, draw, discard, tsumo, claim, canRon, checkIntegrity, STARTING_SCORE } from './game.js';
 import { parse, table, passClaims, check, done } from './test-helpers.js';
 
 // Waits on 1z/2z, so it stays tenpai when seat 0 discards 9s.
@@ -159,9 +159,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
 {
   const s = table({ hands: { 1: YAKULESS_TENPAI }, drawn: '5p' });
   discard(s, s.players[0].drawn.id);
-  claim(s, 1, 'ron');
-  check('a yakuless win pays nothing', s.result.type === 'ron' && s.result.scores[0].han === 0 &&
-    s.scores.every((x) => x === 25000));
+  check('a hand with no yaku is not offered ron (dora don\'t count)', !canRon(s, 1) && !claim(s, 1, 'ron') && s.result === null);
 }
 
 {

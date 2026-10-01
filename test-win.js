@@ -1,7 +1,7 @@
 // Run with: node test-win.js
-import { newHand, draw, discard, tsumo, claim, canTsumo, canRon, checkIntegrity } from './game.js';
+import { newHand, draw, discard, tsumo, claim, canTsumo, canRon, checkIntegrity, declareKan, chiiOptions } from './game.js';
 import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
-import { furitenStatus } from './game.js';
+import { furitenStatus, yakulessTenpai } from './game.js';
 
 {
   const s = table({ hands: { 0: '123m456p789s1122z' }, drawn: '1z' });
@@ -75,6 +75,88 @@ import { furitenStatus } from './game.js';
   check('discards record whether they were tsumogiri',
     s.players[0].tsumogiri.join() === 'true' && s.players[1].tsumogiri.join() === 'false' &&
     s.players.every((p) => p.tsumogiri.length === p.discards.length));
+}
+
+// --- A win needs a yaku ---
+// 111m 234p 567s 789s + 5p waits on 2p/5p and has no yaku of its own (dora don't count).
+const NO_YAKU = '111m234p567s789s5p';
+
+{
+  const s = table({ hands: { 1: NO_YAKU }, drawn: '5p' });
+  s.doraIndicators = parse('4p', 4000); // 5p is dora: still no yaku
+  discard(s, s.players[0].drawn.id);
+  check('no ron without a yaku, even with dora (a chii is still offered)', !canRon(s, 1) && !s.claimOptions[1]?.ron && chiiOptions(s, 1).length > 0);
+}
+{
+  const s = table({ hands: { 1: NO_YAKU }, drawn: '5p', wall: 0 });
+  discard(s, s.players[0].drawn.id);
+  check('houtei alone is enough: ron on the last discard', canRon(s, 1) && claim(s, 1, 'ron') &&
+    s.result.scores[0].yaku.map((y) => y.name).join() === 'Houtei raoyui');
+}
+{
+  const s = table({ hands: { 1: NO_YAKU }, drawn: '5p' });
+  s.players[1].riichi = { turn: -1, discardIndex: 0, double: false, ippatsu: false };
+  s.players[1].discards = parse('9p', 1950);
+  discard(s, s.players[0].drawn.id);
+  check('riichi is a yaku: the same hand can ron after declaring', canRon(s, 1));
+}
+
+// Seat 0 has an open chii of 789s, so no menzen tsumo: 111m 234p 567s 5p + 789s waits on 2p/5p.
+function openNoYaku(wall) {
+  const s = table({ hands: { 0: NO_YAKU }, drawn: '5p', wall });
+  s.players[0].hand = parse('111m234p567s5p', 1000);
+  const chi = parse('789s', 3000);
+  s.players[0].melds.push({ type: 'chi', open: true, tiles: chi, from: 3, calledId: chi[0].id });
+  s.players[0].discards = parse('9p', 1950);
+  return s;
+}
+check('no tsumo with an open hand and no yaku', !canTsumo(openNoYaku(), 0) && !tsumo(openNoYaku(), 0));
+{
+  const s = openNoYaku(0);
+  check('haitei alone is enough: tsumo on the last tile', canTsumo(s, 0) && tsumo(s, 0) &&
+    s.result.scores[0].yaku.map((y) => y.name).join() === 'Haitei raoyue');
+}
+
+{
+  // Seat 1 waits on 3m/6m with no yaku (a triplet rules out pinfu). It can't ron a discarded 6m,
+  // but it can rob seat 0's added kan of 6m: chankan is a yaku.
+  const noYaku6m = '45m111p567s789s99p';
+  const d = table({ hands: { 1: noYaku6m }, drawn: '6m' });
+  discard(d, d.players[0].drawn.id);
+  check('a yakuless hand can\'t ron the 6m as a discard', !canRon(d, 1));
+  const s = table({ hands: { 0: '456p789s23s55m9p', 1: noYaku6m }, drawn: '6m' });
+  s.players[0].hand = parse('456p789s23s55m9p', 1000).slice(0, 10);
+  const pon = parse('666m', 3000);
+  s.players[0].melds.push({ type: 'pon', open: true, tiles: pon, from: 3, calledId: pon[0].id });
+  s.players[0].discards = parse('1p', 1960);
+  declareKan(s, 0, 5);
+  check('chankan alone is enough: it can rob an added kan of 6m', canRon(s, 1) && claim(s, 1, 'ron') &&
+    s.result.scores[0].yaku.map((y) => y.name).join() === 'Chankan');
+}
+
+{
+  // The open hand above, holding 111m and drawing the fourth: after a closed kan of 1m, the
+  // replacement 5p completes it with rinshan as the only yaku.
+  const s = table({ hands: { 0: NO_YAKU }, drawn: '1m' });
+  s.players[0].hand = parse('111m234p567s5p', 1000);
+  const chi = parse('789s', 3000);
+  s.players[0].melds.push({ type: 'chi', open: true, tiles: chi, from: 3, calledId: chi[0].id });
+  s.players[0].discards = parse('9p', 1950);
+  s.deadWall[0] = parse('5p', 7000)[0];
+  declareKan(s, 0, 0);
+  draw(s);
+  check('rinshan alone is enough: tsumo on the replacement tile with an open hand', canTsumo(s, 0) && tsumo(s, 0) &&
+    s.result.scores[0].yaku.map((y) => y.name).join() === 'Rinshan kaihou');
+}
+
+// --- "(no yaku)": tenpai, but no wait would win by ron with a yaku ---
+{
+  const s = table({ hands: { 1: NO_YAKU, 2: '123m456p789s23s55m', 3: '1234567m2468p13s' } });
+  check('a yakuless tenpai hand is flagged', yakulessTenpai(s, 1));
+  check('a hand with a yaku on its waits (pinfu) is not', !yakulessTenpai(s, 2));
+  check('a hand that isn\'t tenpai is not', !yakulessTenpai(s, 3));
+  s.players[1].riichi = { turn: -1, discardIndex: 0, double: false, ippatsu: false };
+  check('after riichi it is not (riichi is a yaku)', !yakulessTenpai(s, 1));
 }
 
 // --- Furiten ---

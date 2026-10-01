@@ -65,6 +65,7 @@ export function newHand({
   scores = [0, 1, 2, 3].map(() => STARTING_SCORE),
   riichiSticks = 0,
   honba = 0,
+  rules = {}, // { yakuRebalance } from the room settings
   wall: fixedWall = null,
 } = {}) {
   const wall = fixedWall ? [...fixedWall] : createWall();
@@ -116,6 +117,7 @@ export function newHand({
     scores: [...scores],
     riichiSticks,
     honba,
+    rules: { yakuRebalance: !!rules.yakuRebalance },
     pendingRiichi: null, // seat whose riichi discard is waiting to pass before the stick is paid
     turnCount: 0,
     discardLog: [], // every discard in order: { tile, from, turn }, turn = turnCount before it
@@ -139,7 +141,10 @@ export function newHand({
   return state;
 }
 
+// The next draw: from the live wall in the 'draw' phase, or the replacement tile after a kan
+// in the 'rinshan' phase.
 export function draw(state) {
+  if (state.phase === 'rinshan') return drawRinshan(state);
   if (state.phase !== 'draw') return null;
   if (state.wall.length === 0) {
     endHand(state, exhaustiveDraw(state));
@@ -196,7 +201,7 @@ export function discard(state, tileId) {
   const options = {};
   for (const p of state.players) {
     if (p.seat === player.seat) continue;
-    const ron = isComplete(toCounts([...p.hand, tile])) && !isFuritenNow(state, p.seat);
+    const ron = isComplete(toCounts([...p.hand, tile])) && !isFuritenNow(state, p.seat) && hasYaku(state, p.seat, tile, false);
     const pon = ponPairs(state, p, tile);
     const kan = openKanTiles(state, p, tile);
     const chii = p.seat === state.current ? chiiPairs(state, p, tile) : [];
@@ -278,8 +283,8 @@ export function declareKyuushu(state, seat) {
 // split it evenly. Nobody pays if everyone or nobody is tenpai. Tenpai here needs no yaku.
 //
 // Nagashi mangan: a player whose discards are all terminals and honors, none of them
-// called, is paid a mangan as if by tsumo. When anyone gets it, it replaces the noten
-// payments.
+// called, is paid a mangan (a baiman with the yaku rebalance) as if by tsumo. When anyone gets
+// it, it replaces the noten payments.
 function exhaustiveDraw(state) {
   const tenpai = state.players.filter((p) => isTenpai(p.hand)).map((p) => p.seat);
   const nagashi = state.players
@@ -289,7 +294,7 @@ function exhaustiveDraw(state) {
 
   if (nagashi.length > 0) {
     const deltas = sumDeltas(nagashi.map((seat) => pointDeltas(
-      { payment: payments(2000, { dealer: seat === state.dealer, tsumo: true }) },
+      { payment: payments(state.rules.yakuRebalance ? 4000 : 2000, { dealer: seat === state.dealer, tsumo: true }) },
       { winner: seat, dealer: state.dealer, from: null, tsumo: true },
     )));
     return { type: 'exhaustiveDraw', tenpai, nagashi, revealed: revealedAtDraw(tenpai, nagashi), deltas };
@@ -320,7 +325,24 @@ function endHand(state, result) {
 }
 
 // --- Winning ---
-// Any complete shape wins for now: a hand with no yaku may still win but scores 0 points.
+// A complete hand can only win (by ron or tsumo) with at least one yaku: dora don't count,
+// but situational yaku do (riichi, ippatsu, menzen tsumo, haitei, houtei, rinshan, chankan,
+// tenhou, chiihou), as do yakuman.
+function hasYaku(state, seat, tile, tsumo, opts) {
+  const score = scoreWin(state, seat, tile, tsumo, opts);
+  return score.yakuman > 0 || score.han > 0;
+}
+
+// True if seat is tenpai but none of the tiles it waits on would win by ron with a yaku right
+// now (so it needs riichi, a yaku from somewhere else, or, if closed, a tsumo). Uses the hand
+// as it stands between draws; false mid-turn.
+export function yakulessTenpai(state, seat) {
+  const { hand } = state.players[seat];
+  if (hand.length % 3 !== 1) return false;
+  const waits = getWaits(hand);
+  const tileOf = (k) => ({ id: -1, suit: SUITS[Math.floor(k / 9)], rank: (k % 9) + 1, red: false });
+  return waits.length > 0 && waits.every((k) => !hasYaku(state, seat, tileOf(k), false));
+}
 
 // Scores seat's win on tile (see scoring.js), with their melds. A tsumo on a replacement tile
 // is rinshan kaihou; chankan is a ron on a tile robbed from a kan.
@@ -344,6 +366,9 @@ function scoreWin(state, seat, tile, tsumo, { chankan = false } = {}) {
     houtei: !tsumo && lastTile,
     rinshan: tsumo && rinshan,
     chankan,
+    rebalance: state.rules.yakuRebalance,
+    // Renhou (yaku rebalance): a non-dealer's ron before their first draw, before any call.
+    renhou: !tsumo && seat !== state.dealer && state.players[seat].discards.length === 0 && !state.callMade,
     tenhou: firstDraw && seat === state.dealer,
     chiihou: firstDraw && seat !== state.dealer,
   };
@@ -384,7 +409,7 @@ function payHonba(state, winner, from, deltas) {
 export function canTsumo(state, seat) {
   const player = state.players[seat];
   return state.phase === 'discard' && state.current === seat && !!player.drawn &&
-    isComplete(toCounts([...player.hand, player.drawn]));
+    isComplete(toCounts([...player.hand, player.drawn])) && hasYaku(state, seat, player.drawn, true);
 }
 
 export function tsumo(state, seat) {
@@ -540,7 +565,7 @@ function makeCall(state, type, { seat, tiles: ids }) {
   if (state.phase === 'ended') return; // suucha riichi
   if (type === 'kan') {
     state.pendingKanDora++;
-    drawRinshan(state, seat);
+    awaitRinshan(state, seat);
     return;
   }
   state.current = seat;
@@ -576,19 +601,26 @@ function revealPendingKanDora(state) {
   for (; state.pendingKanDora > 0; state.pendingKanDora--) revealKanDora(state);
 }
 
-// After a kan the player draws a replacement tile from the dead wall. The last tile of the
-// live wall moves to the dead wall, so the live wall (and everyone's remaining draws) is one
-// tile shorter. A tsumo on the replacement tile is rinshan kaihou.
-function drawRinshan(state, seat) {
+// Once a kan stands, the kan player is due a replacement tile: the hand waits in the
+// 'rinshan' phase (the server pauses briefly here, like before a normal draw) until draw().
+function awaitRinshan(state, seat) {
+  state.current = seat;
+  state.phase = 'rinshan';
+}
+
+// The replacement tile comes from the dead wall, and the last tile of the live wall moves to
+// the dead wall, so the live wall (and everyone's remaining draws) is one tile shorter. A
+// tsumo on the replacement tile is rinshan kaihou.
+function drawRinshan(state) {
   const tile = state.deadWall[state.rinshanUsed];
   state.deadWall[state.rinshanUsed] = null;
   state.rinshanUsed++;
   state.deadWall.push(state.wall.pop());
-  const player = state.players[seat];
+  const player = state.players[state.current];
   player.drawn = tile;
   player.rinshan = true;
-  state.current = seat;
   state.phase = 'discard';
+  return tile;
 }
 
 // The three tiles of the discard's kind seat could reveal for an open kan, as a one-option
@@ -714,7 +746,8 @@ function openChankan(state, kokushiOnly) {
   for (const p of state.players) {
     if (p.seat === seat) continue;
     const counts = toCounts([...p.hand, tile]);
-    const ron = (kokushiOnly ? p.melds.length === 0 && isKokushi(counts) : isComplete(counts)) && !isFuritenNow(state, p.seat);
+    const ron = (kokushiOnly ? p.melds.length === 0 && isKokushi(counts) : isComplete(counts)) && !isFuritenNow(state, p.seat) &&
+      hasYaku(state, p.seat, tile, false, { chankan: true });
     if (ron) options[p.seat] = { ron: true, pon: [], kan: [], chii: [] };
   }
   if (Object.keys(options).length === 0) return finishKan(state);
@@ -738,7 +771,7 @@ function finishKan(state) {
     state.pendingKanDora++;
   }
   interruptFirstGoAround(state);
-  drawRinshan(state, seat);
+  awaitRinshan(state, seat);
 }
 
 // --- Riichi ---

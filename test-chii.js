@@ -65,7 +65,7 @@ const labels = (s, seat) => chiiOptions(s, seat)
 
 {
   // Seat 1 can chii the 3m, seat 2 can ron it (12m waits on 3m).
-  const s = afterDiscard('3m', { 1: '45m123p456p789s12z', 2: '12m456p789s123s55z' });
+  const s = afterDiscard('3m', { 1: '45m123p456p789s12z', 2: '12m456p789s55s555z' });
   claim(s, 1, 'chii', chiiOptions(s, 1)[0]);
   check('a chii waits for players who can ron', s.phase === 'claim' && canRon(s, 2));
   claim(s, 2, 'ron');
