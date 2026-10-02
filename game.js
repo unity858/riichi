@@ -368,11 +368,15 @@ function exhaustiveDraw(state) {
     .map((p) => p.seat);
 
   if (nagashi.length > 0) {
-    const deltas = sumDeltas(nagashi.map((seat) => pointDeltas(
-      { payment: payments(state.rules.yakuRebalance ? 4000 : 2000, { dealer: seat === state.dealer, tsumo: true }) },
-      { winner: seat, dealer: state.dealer, from: null, tsumo: true },
+    // Each nagashi's limit and payment, as for a tsumo (shown in the end-of-hand scoring).
+    const limit = state.rules.yakuRebalance ? 'Baiman' : 'Mangan';
+    const nagashiPay = nagashi.map((seat) => ({
+      seat, limit, payment: payments(state.rules.yakuRebalance ? 4000 : 2000, { dealer: seat === state.dealer, tsumo: true }),
+    }));
+    const deltas = sumDeltas(nagashiPay.map(({ seat, payment }) => pointDeltas(
+      { payment }, { winner: seat, dealer: state.dealer, from: null, tsumo: true },
     )));
-    return { type: 'exhaustiveDraw', tenpai, nagashi, revealed: revealedAtDraw(tenpai, nagashi), deltas };
+    return { type: 'exhaustiveDraw', tenpai, nagashi, nagashiPay, revealed: revealedAtDraw(tenpai, nagashi), deltas };
   }
 
   const deltas = [0, 0, 0, 0];

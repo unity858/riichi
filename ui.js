@@ -651,6 +651,12 @@ $('copy-link').addEventListener('click', async () => {
 });
 $('start').addEventListener('click', () => send({ type: 'start' }));
 $('leave-waiting').addEventListener('click', () => send({ type: 'leave' }));
+// The finished match's replay link opens in place (leaving the room), unless opened in a new tab.
+$('replay-link').firstElementChild.addEventListener('click', (e) => {
+  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+  e.preventDefault();
+  navigate(e.currentTarget.getAttribute('href'));
+});
 $('leave-table').addEventListener('click', () => (view?.replay ? navigate('replays') : send({ type: 'leave' })));
 
 function renderWaiting() {
@@ -1045,6 +1051,14 @@ function alertScores(game, you) {
 function breakdownHtml(game, you) {
   const { result } = game;
   if (result?.type === 'contest') return contestBreakdownHtml(game, you); // wins, and nagashi at the wall
+  if (result?.nagashiPay) {
+    // An exhaustive draw with nagashi: each one's limit and payment, paid as a tsumo.
+    return result.nagashiPay.map(({ seat, limit, payment: p }) => {
+      const who = seat === you ? 'You' : playerName(seat, game);
+      const pay = p.all !== undefined ? `${p.all.toLocaleString()} all` : `${p.nonDealer.toLocaleString()}/${p.dealer.toLocaleString()}`;
+      return `<div class="breakdown"><b>${who}:</b> Nagashi (${limit}): ${pay}</div>`;
+    }).join('');
+  }
   if (!result?.scores) return '';
   return result.winners.map((seat, i) => {
     const s = result.scores[i];
@@ -1223,6 +1237,9 @@ function render() {
   nextHandBtn.hidden = !ended || match.over || you === null || !!view.replay;
   rematchBtn.hidden = !match.over || you !== room.hostSeat || !!view.replay;
   leaveTableBtn.hidden = !match.over && you !== null && !view.replay;
+  // Once a recorded match is over: its replay, linked relative to the site root.
+  $('replay-link').hidden = !match.replay || !!view.replay;
+  if (match.replay) $('replay-link').firstElementChild.href = `replays/match?${new URLSearchParams(match.replay)}`;
   riichiBtn.hidden = !game.riichiDiscards.length;
   riichiBtn.classList.toggle('selected', choosingRiichi);
   tsumoBtn.hidden = !game.canTsumo;

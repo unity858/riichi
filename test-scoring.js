@@ -70,6 +70,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
 
 {
   const s = drawAfterDiscards('19m1z7z', '9s', { 2: TENPAI });
+  check('the result notes each nagashi\'s limit and payment, for the scoring shown', JSON.stringify(s.result.nagashiPay) === JSON.stringify([{ seat: 0, limit: 'Mangan', payment: { all: 4000 } }]));
   check('dealer nagashi: 4000 all, replacing noten payments',
     s.result.nagashi.join() === '0' && s.result.tenpai.join() === '2' &&
     s.result.deltas.join() === '12000,-4000,-4000,-4000');

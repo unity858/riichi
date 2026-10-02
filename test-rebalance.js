@@ -51,6 +51,11 @@ const yakuman = (s, name) => s.yaku.find((y) => y.name === name)?.yakuman;
   };
   check('nagashi: mangan (4000 all from the dealer), baiman (8000 all) with the rebalance',
     nagashi(false) === '12000,-4000,-4000,-4000' && nagashi(true) === '24000,-8000,-8000,-8000');
+  const s = table({ drawn: '9s', wall: 0 });
+  s.rules.yakuRebalance = true;
+  s.players[0].discards = parse('19m1z', 1950);
+  discard(s, s.players[0].drawn.id);
+  check('with the rebalance the result notes it as a baiman, 8000 all', JSON.stringify(s.result.nagashiPay) === JSON.stringify([{ seat: 0, limit: 'Baiman', payment: { all: 8000 } }]));
 }
 
 {

@@ -87,8 +87,9 @@ export function openRecorder(file) {
       if (room.match.settings.format !== 'standard') return;
       safely('a match', () => {
         const players = room.seats.map((p) => p?.name ?? null);
-        const { lastInsertRowid } = q.match.run(room.code, now(), JSON.stringify(room.match.settings), JSON.stringify(players), debug ? 1 : 0);
-        room.record = { matchId: Number(lastInsertRowid), hands: 0, handId: null, logged: 0, handDone: false, matchDone: false };
+        const startedAt = now(); // with the room code, the address of the match's replay
+        const { lastInsertRowid } = q.match.run(room.code, startedAt, JSON.stringify(room.match.settings), JSON.stringify(players), debug ? 1 : 0);
+        room.record = { matchId: Number(lastInsertRowid), startedAt, hands: 0, handId: null, logged: 0, handDone: false, matchDone: false };
       });
     },
     // A new hand of the recorded match, dealt from `seed`.

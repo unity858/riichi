@@ -264,6 +264,8 @@ function viewFor(room, ws) {
       over: m.over,
       final: m.final,
       history: m.history,
+      // Once a recorded match is over (and written), where its replay is: { room, start }.
+      replay: m.over && room.record?.matchDone ? { room: room.code, start: room.record.startedAt } : null,
     },
     auto: you !== null ? autoOf(room, you) : null,
     game: gameView(room, you),
