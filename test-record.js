@@ -7,7 +7,7 @@ import {
   autoDiscardDue, tileCode, checkIntegrity,
 } from './game.js';
 import { seedFromWall } from './seed.js';
-import { replayHand } from './replay.js';
+import { replayHand, replaySteps } from './replay.js';
 import { check, done } from './test-helpers.js';
 
 // A small seeded random number generator (mulberry32), so failures can be repeated.
@@ -127,6 +127,42 @@ const summary = (s) => JSON.stringify({
     mismatches === 0 && errors === 0);
   check('and they cover every kind of action',
     ['discard', 'chii', 'pon', 'kan', 'ankan', 'kakan', 'ron', 'tsumo', 'kyuushu'].every((t) => types.get(t) > 0));
+}
+
+{
+  // Stepping through hands, as the replay page does: the start, each draw, each action, and an
+  // end step if the last discard was still open. Every step can be reached on its own, and the
+  // last is the hand's end.
+  let problems = 0;
+  let steps = 0;
+  let first = null;
+  for (let i = 0; i < 60; i++) {
+    const start = { dealer: i % 4, roundWind: 0, scores: [25000, 25000, 25000, 25000], riichiSticks: 0, honba: 0, rules: {} };
+    const { s, seed } = playRandomHand(5000 + i, start);
+    const hand = { seed, ...start };
+    const full = replaySteps(hand, s.log);
+    const draws = full.steps.filter((t) => t.type === 'draw').length;
+    const ends = full.steps.filter((t) => t.type === 'end').length;
+    const shape = full.steps[0].type === 'start' && full.steps.length === 1 + draws + s.log.length + ends && ends <= 1 &&
+      summary(full.state) === summary(s) && full.state.phase === 'ended';
+    if (!shape) {
+      problems++;
+      first ??= `hand ${5000 + i}: ${full.steps.length} steps, ended ${full.state.phase}`;
+    }
+    for (let k = 0; k < full.steps.length; k++) {
+      steps++;
+      const at = replaySteps(hand, s.log, k);
+      const actionsSoFar = full.steps.slice(0, k + 1).filter((t) => !['start', 'draw', 'end'].includes(t.type)).length;
+      const same = at.steps.length === k + 1 && JSON.stringify(at.steps) === JSON.stringify(full.steps.slice(0, k + 1)) &&
+        at.state.log.length === actionsSoFar && (full.steps[k].type !== 'draw' || !!at.state.players[full.steps[k].seat].drawn);
+      if (!same) {
+        problems++;
+        first ??= `hand ${5000 + i}, step ${k} (${full.steps[k].type})`;
+      }
+    }
+  }
+  check(`stepping through 60 hands (${steps} steps, draws and actions): every step reached on its own, the last the hand's end${first ? ` (first problem: ${first})` : ''}`,
+    problems === 0);
 }
 
 {

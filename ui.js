@@ -3,6 +3,7 @@
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
 import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS } from './game.js';
+import { replaySteps } from './replay.js';
 
 const $ = (id) => document.getElementById(id);
 const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table'), matches: $('matches'), replay: $('replay') };
@@ -83,6 +84,7 @@ let joinedCode = null;
 function showRoute() {
   const page = route();
   $('lobby-error').textContent = '';
+  if (page !== 'replays/match' && view?.replay) view = null; // a replay's table is only on its page
   if (page !== 'game' && joinedCode) send({ type: 'leave' });
   if (page === 'game') {
     const code = query('room');
@@ -375,8 +377,14 @@ function renderMatches() {
   const body = $('matches-table').tBodies[0];
   body.innerHTML = '';
   for (const m of found.slice(0, MATCHES_SHOWN)) {
-    // Each cell links to the match's replay: replays/match?room=<code>&start=<time>.
+    // Each cell links to the match's replay: replays/match?room=<code>&start=<time>. A match still
+    // being played has no replay yet (it would show everyone's hands).
     const row = body.insertRow();
+    if (!m.finished) {
+      row.insertCell().textContent = startTime(m.startedAt);
+      row.insertCell().textContent = `${m.room} (in progress)`;
+      continue;
+    }
     const address = `replays/match?${new URLSearchParams({ room: m.room, start: m.startedAt })}`;
     for (const text of [startTime(m.startedAt), m.room]) {
       const link = document.createElement('a');
@@ -409,13 +417,182 @@ async function openMatches() {
 $('open-matches').addEventListener('click', () => navigate('replays'));
 $('matches-back').addEventListener('click', () => navigate('./'));
 
-// --- A match's replay (replays/match?room=<code>&start=<time>): not built yet ---
-function showReplay() {
+// --- A match's replay: replays/match?room=<code>&start=<time>[&hand=<n>&step=<k>] ---
+// The match (from api/match) is replayed in the browser with replay.js and shown on the table,
+// every hand face up, watched from one seat (the room's first seat, East in East 1, until
+// "Switch view"). A hand's steps are its start (the dealer holding their first draw), then each
+// draw and each action (a discard, call, kan or win) in turn, the last being the hand's end
+// (see replaySteps). The navbar under the dora panel, scrolling over the table and the arrow
+// keys step through it, and the address keeps the hand and step, to link to a moment.
+let replayMatch = null; // { key: room + start, data, steps: each hand's steps once worked out }
+let replayPos = { hand: 0, step: 0 };
+let replayPov = 0;
+
+async function showReplay() {
   const room = query('room');
   const start = query('start');
-  $('replay-which').textContent = room && start ? `Room ${room}, started ${startTime(start)}` : 'No match given.';
-  showScreen('replay');
+  const key = `${room} ${start}`;
+  if (replayMatch?.key !== key) {
+    replayMatch = null;
+    replayPov = 0;
+    $('replay-which').textContent = room && start ? `Room ${room}, started ${startTime(start)}` : '';
+    $('replay-status').textContent = room && start ? 'Loading…' : 'No match given.';
+    showScreen('replay');
+    if (!room || !start) return;
+    let data;
+    try {
+      const res = await fetch(new URL(`api/match?${new URLSearchParams({ room, start })}`, ROOT));
+      data = await res.json();
+      if (!res.ok) {
+        $('replay-status').textContent = data.error;
+        return;
+      }
+    } catch {
+      $('replay-status').textContent = 'Could not load the match.';
+      return;
+    }
+    if (route() !== 'replays/match' || query('room') !== room || query('start') !== start) return; // moved on meanwhile
+    replayMatch = { key, data, steps: [] };
+  }
+  const { hands } = replayMatch.data;
+  const hand = clamp(Number(query('hand') ?? 1) - 1, 0, hands.length - 1);
+  replayPos = { hand, step: clamp(Number(query('step') ?? 0), 0, lastStep(hand)) };
+  renderReplay();
 }
+
+// A hand's steps (worked out once), and the index of its last step (the hand's end). A hand
+// that can't be replayed has just its start.
+function handSteps(hand) {
+  const h = replayMatch.data.hands[hand];
+  try {
+    replayMatch.steps[hand] ??= replaySteps(h, h.actions).steps;
+  } catch {
+    replayMatch.steps[hand] = [{ type: 'start' }];
+  }
+  return replayMatch.steps[hand];
+}
+const lastStep = (hand) => handSteps(hand).length - 1;
+const clamp = (n, lo, hi) => (Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : lo);
+
+function renderReplay() {
+  const m = replayMatch.data;
+  const h = m.hands[replayPos.hand];
+  const { step } = replayPos;
+  let s;
+  try {
+    s = replaySteps(h, h.actions, step).state;
+  } catch (err) {
+    view = null;
+    $('replay-status').textContent = `This hand can't be replayed with the current rules (${err.message}).`;
+    showScreen('replay');
+    return;
+  }
+  const last = replayPos.hand === m.hands.length - 1 && step === lastStep(replayPos.hand);
+  view = {
+    replay: { note: describeStep(handSteps(replayPos.hand)[step], h, m.players) },
+    you: replayPov,
+    auto: null,
+    room: { code: m.room, started: true, hostSeat: 0, settings: m.settings, seats: m.players.map((name, i) => ({ name: name ?? `Player ${i + 1}`, connected: true })) },
+    match: { label: h.label, honba: h.honba, over: last, final: m.final },
+    game: replayGameView(s),
+  };
+  // The address follows, without a history entry per turn.
+  const address = `replays/match?${new URLSearchParams({ room: m.room, start: m.startedAt, hand: replayPos.hand + 1, step })}`;
+  history.replaceState(null, '', new URL(address, ROOT));
+  $('round-label').textContent = `Round: ${h.label}${h.honba ? ` · ${h.honba} honba` : ''}`;
+  $('step-label').textContent = `Step: ${step} / ${lastStep(replayPos.hand)}`;
+  $('round-prev').disabled = replayPos.hand === 0 && step === 0;
+  $('round-next').disabled = replayPos.hand === m.hands.length - 1;
+  $('step-prev').disabled = replayPos.hand === 0 && step === 0;
+  $('step-next').disabled = last;
+  render();
+}
+
+// The replayed state as the table expects it: like the server's view, but every hand shown and
+// nothing to do (no buttons, clicks or hints).
+function replayGameView(s) {
+  let turn = s.current;
+  if (s.phase === 'claim') turn = s.lastDiscard.from;
+  else if (s.phase === 'draw') turn = s.discardLog.at(-1)?.from ?? s.current;
+  return {
+    contest: false, exchange: null, passes: null, contestWins: [], uraIndicators: null,
+    dealer: s.dealer, current: s.current, turn, phase: s.phase, roundWind: s.roundWind, scores: s.scores,
+    riichiSticks: s.riichiSticks, honba: s.honba, wallCount: s.wall.length, doraIndicators: s.doraIndicators,
+    lastDiscard: null, result: s.result, noHints: true, autoDiscarding: false, furiten: null, waits: [], discardPreview: {},
+    canTsumo: false, canRon: false, canKyuushu: false, ponOptions: [], chiiOptions: [], openKanOptions: [], kanOptions: [], riichiDiscards: [],
+    players: s.players.map((p) => ({
+      seat: p.seat, discards: p.discards, tsumogiri: p.tsumogiri, called: p.called, melds: p.melds,
+      handCount: p.hand.length, hasDrawn: !!p.drawn, hand: p.hand, drawn: p.drawn, riichi: p.riichi, callout: p.callout, won: null,
+    })),
+  };
+}
+
+// A step in words, e.g. "S (Bob) draws 5m" or "S (Bob) pons 5m from E (Alice)". Names come from
+// the match record (escaped: they go into HTML). The end step shows the result instead.
+function describeStep(step, h, players) {
+  const who = (seat) => `${seatWind(seat, h.dealer)} (${escapeHtml(players[seat] ?? `Player ${seat + 1}`)})`;
+  const tile = (code) => tileLabel({ suit: code.slice(-1), rank: code[0] === '0' ? 5 : Number(code[0]), red: code[0] === '0' });
+  if (step.type === 'start') return `${h.label}: dealt, the dealer ${who(h.dealer)} has drawn`;
+  if (step.type === 'draw') return `${who(step.seat)} draws ${tile(step.tile)}`;
+  if (step.type === 'end') return '';
+  const a = step.action;
+  switch (a.type) {
+    case 'discard': return `${who(a.seat)} ${a.riichi ? 'declares riichi, discarding' : 'discards'} ${tile(a.tile)}${a.tsumogiri ? ' (tsumogiri)' : ''}`;
+    case 'chii': case 'pon': case 'kan':
+      return `${who(a.seat)} ${a.type === 'kan' ? 'kans' : `${a.type}s`} ${tile(a.tile)} from ${who(a.from)}`;
+    case 'ankan': return `${who(a.seat)} declares a closed kan of ${tile(a.tiles[0])}`;
+    case 'kakan': return `${who(a.seat)} adds ${tile(a.tile)} to a pon`;
+    case 'ron': return `${a.seats.map(who).join(' and ')} ron on ${tile(a.tile)} from ${who(a.from)}`;
+    case 'tsumo': return `${who(a.seat)} wins by tsumo on ${tile(a.tile)}`;
+    case 'kyuushu': return `${who(a.seat)} declares kyuushu kyuuhai`;
+    default: return '';
+  }
+}
+
+// Moving: by step, carrying on into the next or previous hand at either end; by round, to the
+// start of the next or previous hand (or of this one).
+function stepReplay(by, dir) {
+  if (!replayMatch || !view?.replay) return;
+  const { hands } = replayMatch.data;
+  let { hand, step } = replayPos;
+  if (by === 'step' && dir > 0) {
+    if (step < lastStep(hand)) step++;
+    else if (hand < hands.length - 1) [hand, step] = [hand + 1, 0];
+  } else if (by === 'step') {
+    if (step > 0) step--;
+    else if (hand > 0) [hand, step] = [hand - 1, lastStep(hand - 1)];
+  } else if (dir > 0) {
+    if (hand < hands.length - 1) [hand, step] = [hand + 1, 0];
+  } else if (step > 0) {
+    step = 0;
+  } else if (hand > 0) {
+    [hand, step] = [hand - 1, 0];
+  }
+  if (hand === replayPos.hand && step === replayPos.step) return;
+  replayPos = { hand, step };
+  renderReplay();
+}
+$('round-prev').addEventListener('click', () => stepReplay('round', -1));
+$('round-next').addEventListener('click', () => stepReplay('round', 1));
+$('step-prev').addEventListener('click', () => stepReplay('step', -1));
+$('step-next').addEventListener('click', () => stepReplay('step', 1));
+// Scrolling over the table moves a step (a notch of a mouse wheel, or a stretch of a trackpad).
+let wheelSum = 0;
+$('table').addEventListener('wheel', (e) => {
+  if (!view?.replay) return;
+  e.preventDefault();
+  wheelSum += e.deltaY;
+  if (Math.abs(wheelSum) < 50) return;
+  stepReplay('step', Math.sign(wheelSum));
+  wheelSum = 0;
+}, { passive: false });
+document.addEventListener('keydown', (e) => {
+  if (!view?.replay || e.target.closest?.('input')) return;
+  if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    e.preventDefault();
+    stepReplay('step', e.key === 'ArrowRight' ? 1 : -1);
+  }
+});
 $('replay-back').addEventListener('click', () => navigate('replays'));
 $('matches-search').addEventListener('input', renderMatches);
 
@@ -434,7 +611,8 @@ $('copy-link').addEventListener('click', async () => {
   setTimeout(() => ($('copied').hidden = true), 1500);
 });
 $('start').addEventListener('click', () => send({ type: 'start' }));
-for (const id of ['leave-waiting', 'leave-table']) $(id).addEventListener('click', () => send({ type: 'leave' }));
+$('leave-waiting').addEventListener('click', () => send({ type: 'leave' }));
+$('leave-table').addEventListener('click', () => (view?.replay ? navigate('replays') : send({ type: 'leave' })));
 
 function renderWaiting() {
   const { room, you } = view;
@@ -516,7 +694,10 @@ previewBox.hidden = true;
 document.body.appendChild(previewBox);
 function showPreview(tileElement, preview) {
   previewBox.innerHTML = '';
-  fillWaits(previewBox, preview.waits, preview.furiten);
+  // While choosing a riichi tile, riichi itself is the yaku: every wait wins by ron as well as
+  // tsumo, so no "(tsumo only)" or "(no yaku)". Furiten still shows as it is.
+  const waits = choosingRiichi ? preview.waits.map((w) => ({ ...w, ron: true, tsumo: true })) : preview.waits;
+  fillWaits(previewBox, waits, preview.furiten);
   previewBox.hidden = false;
   const rect = tileElement.getBoundingClientRect();
   const top = rect.top + window.scrollY - previewBox.offsetHeight - 6;
@@ -596,6 +777,7 @@ function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {
 
 // Whether your own tile can be clicked right now.
 function canClickTile(tile, player, game, you) {
+  if (view?.replay) return false; // replays are only watched
   if (player.seat !== you || isWild(tile)) return false; // the wild tile is never discarded or passed
   if (game.phase === 'exchange') return !game.exchange.mine; // until you have passed your three
   if (game.current !== you || game.phase !== 'discard') return false;
@@ -638,7 +820,7 @@ function renderSeat(el, player, game, you) {
 
   const name = document.createElement('div');
   name.className = 'seat-name';
-  const who = player.seat === you ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
+  const who = player.seat === you && !view.replay ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
   const offline = view.room.seats[player.seat]?.connected ? '' : ' (offline)';
   // The dealer's seat wind (always E) is shown in red.
   const wind = seatWind(player.seat, game.dealer);
@@ -665,6 +847,17 @@ function renderSeat(el, player, game, you) {
     box.className = `callout callout-${player.callout}`;
     box.textContent = CALLOUT_LABELS[player.callout];
     name.appendChild(box);
+  }
+  if (view.replay && player.seat !== you) {
+    // Replays: watch from this player's seat instead (after the score; the line's text is done).
+    const switchBtn = document.createElement('button');
+    switchBtn.className = 'switch-view';
+    switchBtn.textContent = 'Switch view';
+    switchBtn.addEventListener('click', () => {
+      replayPov = player.seat;
+      renderReplay();
+    });
+    name.appendChild(switchBtn);
   }
   el.appendChild(name);
 
@@ -920,7 +1113,7 @@ function renderDora(game) {
 }
 
 function render() {
-  if (!view || route() !== 'game') return; // the table only shows on the game page
+  if (!view || route() !== (view.replay ? 'replays/match' : 'game')) return; // the table's two pages
   hidePreview(); // the tiles are redrawn, so any hover box or highlight is stale
   clearHighlight();
   const { you, game, room, match } = view;
@@ -942,7 +1135,7 @@ function render() {
   const offline = room.seats.filter((p) => !p.connected).length;
   infoEl.innerHTML = `
     ${match.over ? finalHtml(match, you) : ''}
-    ${(() => { const status = statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
+    ${(() => { const status = view.replay && !game.result ? view.replay.note : statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
     ${breakdownHtml(game, you)}
     <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
     ${passesHtml(game)}
@@ -953,12 +1146,15 @@ function render() {
     ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
     <div class="room-code">Room ${room.code}</div>
   `;
-  autoEl.hidden = you === null;
+  autoEl.hidden = you === null || !!view.replay;
+  $('replay-nav').hidden = !view.replay;
+  $('table-hint').hidden = !!view.replay;
+  leaveTableBtn.textContent = view.replay ? 'Back' : 'Leave';
   for (const box of autoBoxes) box.checked = !!view.auto?.[box.dataset.auto];
   const ended = game.phase === 'ended';
-  nextHandBtn.hidden = !ended || match.over || you === null;
-  rematchBtn.hidden = !match.over || you !== room.hostSeat;
-  leaveTableBtn.hidden = !match.over && you !== null;
+  nextHandBtn.hidden = !ended || match.over || you === null || !!view.replay;
+  rematchBtn.hidden = !match.over || you !== room.hostSeat || !!view.replay;
+  leaveTableBtn.hidden = !match.over && you !== null && !view.replay;
   riichiBtn.hidden = !game.riichiDiscards.length;
   riichiBtn.classList.toggle('selected', choosingRiichi);
   tsumoBtn.hidden = !game.canTsumo;
@@ -1028,7 +1224,7 @@ passBtn.addEventListener('click', () => send({ type: 'pass' }));
 
 // Space discards the drawn tile (tsumogiri) on your turn. In riichi it only declines a tsumo.
 document.addEventListener('keydown', (e) => {
-  if (e.code !== 'Space' || !view?.game || choosingRiichi) return;
+  if (e.code !== 'Space' || !view?.game || view.replay || choosingRiichi) return;
   const { game, you } = view;
   const me = game.players[you];
   if (me?.riichi && !game.canTsumo) return;

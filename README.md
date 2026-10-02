@@ -14,8 +14,8 @@ Pages:
 | --- | --- |
 | `/` | the main page: pick a name, create or join a room |
 | `/game?room=<code>` | a room: its waiting room, then the table (this is the invite link) |
-| `/replays` | recent recorded matches, with a search |
-| `/replays/match?room=<code>&start=<time>` | one match's replay (not built yet) |
+| `/replays` | recent recorded matches, with a search (finished ones link to their replay) |
+| `/replays/match?room=<code>&start=<time>` | a finished match's replay; `&hand=<n>&step=<k>` opens a given moment |
 
 Any other address redirects to the main page. Every link and file reference is relative to the site root (the server writes a relative `<base href>` into each page), so the game also works behind a proxy at a sub-path. The browser's Back and Forward buttons move between the pages; going Back out of a room leaves it (during a match the seat is kept for you).
 
@@ -75,6 +75,10 @@ node tools/replay.mjs list          # recorded matches
 node tools/replay.mjs match 3       # the hands of match 3
 node tools/replay.mjs hand 12       # hand 12 move by move, replayed and checked against its result
 ```
+
+The replay page (`/replays/match?...`) does the same in the browser: every hand face up, seen from the room's first seat (East in East 1) until you press "Switch view" on another player. The navbar under the dora panel steps by round (hand) or by step (each draw, and each action: a discard, call, kan or win); scrolling over the table and the ← → keys move a step. The address keeps the hand and step, so you can link to a moment. Only finished matches have replays: one still being played would show everyone's hands.
+
+Replays re-run the current rules, so after a rule change older records may no longer fit (the page then says the hand can't be replayed). The plan is to start a fresh database instead: stop the server and delete `matches.db` (and `matches.db-wal`, `matches.db-shm`).
 
 Or query it directly, e.g. `sqlite3 matches.db "SELECT label, json_extract(result, '$.type') FROM hands WHERE match_id = 3"`.
 

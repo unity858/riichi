@@ -13,15 +13,52 @@ import { wallFromSeed } from './seed.js';
 // start: { seed, dealer, roundWind, scores, riichiSticks, honba, rules }, as recorded for the
 // hand; actions: its state.log. Returns the replayed state (ended, if the hand finished).
 // Throws if an action can't be replayed, which would mean the record is wrong.
-export function replayHand(start, actions) {
+export function replayHand(start, actions, { finish = true } = {}) {
   const { seed, dealer, roundWind, scores, riichiSticks, honba, rules } = start;
   const s = newHand({ dealer, roundWind, scores, riichiSticks, honba, rules, wall: wallFromSeed(seed) });
   actions.forEach((action, i) => {
     settle(s, action);
     if (!apply(s, action)) throw new Error(`action ${i} (${JSON.stringify(action)}) can't be replayed in phase ${s.phase}`);
   });
-  if (s.phase === 'claim') passAll(s); // the hand's last discard, which nobody called
+  if (finish && s.phase === 'claim') passAll(s); // the hand's last discard, which nobody called
   return s;
+}
+
+// The hand step by step, for the replay page. The steps, in order:
+//   { type: 'start', seat }        the hand dealt, the dealer holding their first draw
+//   { type: 'draw', seat, tile }   a draw (or a kan's replacement tile), after any passes
+//   { type: <action>, seat, action } each recorded action (see state.log)
+//   { type: 'end' }                only if the hand isn't over after its last action: its last
+//                                  discard, still open to calls, passes and the hand ends
+// Returns { state, steps }: with upTo, the state just after step upTo (steps listed up to it),
+// otherwise the whole hand. A discard nobody calls stays open until the next step (the draw),
+// so the step after a discard shows it while others could still call it.
+export function replaySteps(start, actions, upTo = Infinity) {
+  const { seed, dealer, roundWind, scores, riichiSticks, honba, rules } = start;
+  const s = newHand({ dealer, roundWind, scores, riichiSticks, honba, rules, wall: wallFromSeed(seed) });
+  const steps = [{ type: 'start', seat: s.current }];
+  const done = () => ({ state: s, steps });
+  const more = () => steps.length <= upTo;
+  for (const [i, action] of actions.entries()) {
+    for (;;) {
+      const open = s.phase === 'claim' && !CALLS.includes(action.type);
+      if (!open && s.phase !== 'draw' && s.phase !== 'rinshan') break;
+      if (!more()) return done();
+      if (open) passAll(s);
+      if (s.phase === 'draw' || s.phase === 'rinshan') {
+        draw(s);
+        steps.push({ type: 'draw', seat: s.current, tile: tileCode(s.players[s.current].drawn) });
+      }
+    }
+    if (!more()) return done();
+    if (!apply(s, action)) throw new Error(`action ${i} (${JSON.stringify(action)}) can't be replayed in phase ${s.phase}`);
+    steps.push({ type: action.type, seat: action.seat ?? action.seats?.[0], action });
+  }
+  if (s.phase === 'claim' && more()) {
+    passAll(s);
+    if (s.phase === 'ended') steps.push({ type: 'end' });
+  }
+  return done();
 }
 
 const CALLS = ['chii', 'pon', 'kan', 'ron'];

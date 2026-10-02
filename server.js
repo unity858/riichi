@@ -61,7 +61,8 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const RECORD = !process.env.NO_RECORD || process.env.NO_RECORD === '0';
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'matches.db');
 const recorder = RECORD ? openRecorder(DB_PATH) : null;
-const STATIC = new Set(['/style.css', '/ui.js', '/game.js', '/scoring.js']); // index.html is served for the pages below
+// index.html is served for the pages below; replay.js and seed.js run replays in the browser.
+const STATIC = new Set(['/style.css', '/ui.js', '/game.js', '/scoring.js', '/replay.js', '/seed.js']);
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
 // Tile images, cut from riichi-mahjong-tiles-svg by tools/cut-tiles.mjs. Only plain names match,
 // so nothing outside tiles/ can be reached.
@@ -95,7 +96,15 @@ const server = http.createServer((req, res) => {
     });
     return;
   }
-  // The recorded matches, for the Recent matches page: [{ id, room, startedAt }], newest first.
+  // One finished match, for its replay page (see getMatch in db.js).
+  if (pathname === '/api/match') {
+    const params = new URLSearchParams(query);
+    const match = recorder?.getMatch(params.get('room') ?? '', params.get('start') ?? '');
+    res.writeHead(match ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(match ?? { error: 'There is no finished recorded match with that room and start time.' }));
+    return;
+  }
+  // The recorded matches, for the Recent matches page: [{ id, room, startedAt, finished }], newest first.
   if (pathname === '/api/matches') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ recording: !!recorder, matches: recorder?.listMatches() ?? [] }));
@@ -232,6 +241,7 @@ function viewFor(room, ws) {
   const seat = seatOf(room, ws);
   const you = seat >= 0 ? seat : null;
   const m = room.match;
+  const ended = room.state?.phase === 'ended' && m?.history.length > 0; // the hand is over, not yet the next one
   return {
     type: 'state',
     noDelays: NO_DELAYS,
@@ -245,10 +255,12 @@ function viewFor(room, ws) {
       started: !!m,
     },
     match: m && {
-      label: handLabel(m),
+      // After a hand ends, the match has already moved on (recordHand); until the next hand
+      // starts, its label and honba are still the hand just played.
+      label: ended ? m.history.at(-1).label : handLabel(m),
       roundWind: m.roundWind,
       hand: m.hand,
-      honba: m.honba,
+      honba: ended ? m.history.at(-1).honba : m.honba,
       over: m.over,
       final: m.final,
       history: m.history,

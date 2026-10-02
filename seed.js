@@ -1,5 +1,5 @@
 // Wall seeds: a fixed order for the 136 tiles in place of a random shuffle, for debugging.
-// Server-side only.
+// Used by the server (DEBUG_SEED, recording) and by replays in the browser (see replay.js).
 //
 // A seed is written in tile notation, read left to right as wall positions 0, 1, 2, ...:
 // "123m" is 1m, 2m, 3m; 0m/0p/0s are the red fives; honors are 1z-7z (E S W N Haku Hatsu

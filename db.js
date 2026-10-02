@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS actions (
   PRIMARY KEY (hand_id, seq)
 );
 CREATE INDEX IF NOT EXISTS hands_by_match ON hands (match_id, number);
+CREATE INDEX IF NOT EXISTS matches_by_room ON matches (room, started_at);
 `;
 
 // Tiles as seed notation in stored JSON (results hold tile objects).
@@ -123,11 +124,28 @@ export function openRecorder(file) {
         }
       });
     },
-    // Recorded matches, newest first: { id, room, startedAt }. Matches played with DEBUG_SEED
-    // (test games) are left out.
+    // Recorded matches, newest first: { id, room, startedAt, finished }. Matches played with
+    // DEBUG_SEED (test games) are left out.
     listMatches() {
-      return db.prepare('SELECT id, room, started_at AS startedAt FROM matches WHERE debug = 0 ORDER BY id DESC').all()
-        .map((m) => ({ id: m.id, room: m.room, startedAt: m.startedAt }));
+      return db.prepare('SELECT id, room, started_at, ended_at FROM matches WHERE debug = 0 ORDER BY id DESC').all()
+        .map((m) => ({ id: m.id, room: m.room, startedAt: m.started_at, finished: m.ended_at !== null }));
+    },
+    // One finished match for its replay, by room code and start time (a room code alone can be
+    // used again later), with its hands and their actions; null if there is none. A match still
+    // being played isn't given out: its replay would show everyone's hands.
+    getMatch(room, startedAt) {
+      const m = db.prepare('SELECT * FROM matches WHERE room = ? AND started_at = ? AND ended_at IS NOT NULL').get(room, startedAt);
+      if (!m) return null;
+      const actions = db.prepare('SELECT data FROM actions WHERE hand_id = ? ORDER BY seq');
+      const hands = db.prepare('SELECT * FROM hands WHERE match_id = ? ORDER BY number').all(m.id).map((h) => ({
+        number: h.number, label: h.label, dealer: h.dealer, roundWind: h.round_wind, honba: h.honba, riichiSticks: h.riichi_sticks,
+        scores: JSON.parse(h.scores), rules: JSON.parse(h.rules), seed: h.seed, result: h.result && JSON.parse(h.result),
+        actions: actions.all(h.id).map((a) => JSON.parse(a.data)),
+      }));
+      return {
+        room: m.room, startedAt: m.started_at, endedAt: m.ended_at, settings: JSON.parse(m.settings),
+        players: JSON.parse(m.players), final: JSON.parse(m.final), hands,
+      };
     },
     close() {
       db.close();

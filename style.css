@@ -260,3 +260,9 @@ button.selected { outline: 2px solid #1565c0; }
 #matches-table th, #matches-table td { border: 1px solid #ccc; padding: 4px 10px; text-align: left; }
 #matches-table th { background: #f2f2f2; }
 #matches-table td:last-child { font-family: ui-monospace, monospace; }
+
+/* Replays: the step navbar under the dora panel, and the Switch view buttons. */
+#replay-nav { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px; font-size: 0.9em; }
+#replay-nav[hidden] { display: none; }
+#replay-nav span { min-width: 8em; text-align: center; }
+.switch-view { margin-left: 8px; font-size: 0.8em; padding: 0 6px; }

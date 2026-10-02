@@ -42,12 +42,13 @@
     <p class="hint" id="matches-note"></p>
   </main>
 
-  <!-- One match's replay (replays/match?room=<code>&start=<time>): still to do. -->
+  <!-- A match's replay (replays/match?room=<code>&start=<time>) while it loads, or if it can't be
+       shown; the replay itself uses the table below. -->
   <main id="replay" class="screen" hidden>
     <h1>Match replay</h1>
     <p><button id="replay-back">Back</button></p>
     <p id="replay-which"></p>
-    <p class="hint">Todo: replays aren't shown yet.</p>
+    <p id="replay-status"></p>
   </main>
 
   <!-- Waiting room: seats fill up, the host picks settings and starts. -->
@@ -94,7 +95,7 @@
         <label><input type="checkbox" data-auto="tsumogiri"> Discard each draw (tsumogiri)</label>
       </fieldset>
       <label class="display-option"><input type="checkbox" id="algebraic"> Algebraic tiles (5p instead of pictures)</label>
-      <p class="hint">Click a tile to discard. Press <kbd>Space</kbd> to discard the drawn tile.</p>
+      <p class="hint" id="table-hint">Click a tile to discard. Press <kbd>Space</kbd> to discard the drawn tile.</p>
     </section>
     <!-- Dora indicators: revealed ones face up; ura dora flip when a riichi hand wins. -->
     <section id="dora-panel">
@@ -103,6 +104,11 @@
       <div class="dora-label">Ura dora:</div>
       <div class="dora-row" id="ura-row"></div>
     </section>
+    <!-- Replays only: step through the match by round (hand) or by step (a draw or an action). -->
+    <nav id="replay-nav" hidden>
+      <button id="round-prev" aria-label="Previous round">&lt;</button> <span id="round-label">Round</span> <button id="round-next" aria-label="Next round">&gt;</button>
+      <button id="step-prev" aria-label="Previous step">&lt;</button> <span id="step-label">Step</span> <button id="step-next" aria-label="Next step">&gt;</button>
+    </nav>
     </div>
     <section class="seat seat-right" data-pos="right"></section>
     <section class="seat seat-bottom" data-pos="bottom"></section>
