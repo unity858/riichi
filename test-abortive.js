@@ -3,7 +3,7 @@ import {
   draw, discard, claim, canKyuushu, declareKyuushu, declareRiichi, canTsumo, riichiDiscards,
 } from './game.js';
 import { newMatch, recordHand, handLabel } from './match.js';
-import { parse, table, check, done } from './test-helpers.js';
+import { parse, table, passClaims, check, done } from './test-helpers.js';
 
 // --- Kyuushu kyuuhai ---
 // Seat 0 (dealer) on its first draw.
@@ -94,6 +94,65 @@ function threeInRiichi(hands, drawn) {
   s.players[3].riichi = null;
   declareRiichi(s, 0, s.players[0].drawn.id);
   check('three riichi do not abort the hand', s.phase === 'draw' && s.riichiSticks === 4);
+}
+
+// --- Suufon renda ---
+// Each seat holds one of `winds` (1z-7z, by seat) among tiles that can't win, pon or chii.
+const WINDLESS = '123456m2468p13s';
+function windTable(winds) {
+  return table({ hands: Object.fromEntries(winds.map((w, seat) => [seat, WINDLESS + w])), drawn: '9p' });
+}
+// The current player discards their honor tile, everyone passes, and the next player draws.
+function throwHonor(s) {
+  discard(s, s.players[s.current].hand.find((t) => t.suit === 'z').id);
+  passClaims(s);
+  draw(s);
+}
+
+{
+  const s = windTable(['1z', '1z', '1z', '1z']);
+  s.riichiSticks = 1;
+  for (let i = 0; i < 3; i++) throwHonor(s);
+  check('three of the same wind do not abort the hand', s.phase === 'discard' && s.current === 3);
+  throwHonor(s);
+  check('the fourth of the same wind as everyone\'s first discard: suufon renda', s.phase === 'ended' &&
+    s.result.type === 'abortiveDraw' && s.result.reason === 'suufon renda' && s.result.deltas.every((d) => d === 0) &&
+    s.result.revealed.length === 0 && s.riichiSticks === 1);
+  const m = newMatch();
+  recordHand(m, s);
+  check('the dealer repeats with one more honba', m.dealer === 0 && m.honba === 1);
+}
+{
+  const s = windTable(['2z', '2z', '2z', '2z']);
+  for (let i = 0; i < 4; i++) throwHonor(s);
+  check('any wind counts, not just the round wind', s.result?.reason === 'suufon renda');
+}
+{
+  const s = windTable(['1z', '1z', '2z', '1z']);
+  for (let i = 0; i < 4; i++) throwHonor(s);
+  check('not with different winds', s.phase === 'discard' && s.result === null);
+}
+{
+  const s = windTable(['5z', '5z', '5z', '5z']);
+  for (let i = 0; i < 4; i++) throwHonor(s);
+  check('not with dragons', s.phase === 'discard' && s.result === null);
+}
+{
+  const s = windTable(['1z', '1z', '1z', '1z']);
+  throwHonor(s);
+  s.callMade = true; // as after a pon, chii or kan
+  for (let i = 0; i < 3; i++) throwHonor(s);
+  check('not after any call or kan', s.phase === 'discard' && s.result === null);
+}
+{
+  // Seat 3 declares riichi on the fourth wind: the riichi stands, then the hand aborts.
+  const s = windTable(['1z', '1z', '1z', '123m456p789s23s44z']);
+  for (let i = 0; i < 3; i++) throwHonor(s);
+  s.players[3].drawn = parse('1z', 6100)[0];
+  const declared = declareRiichi(s, 3, s.players[3].drawn.id);
+  passClaims(s);
+  check('a riichi on the fourth wind is paid before suufon renda', declared && s.result?.reason === 'suufon renda' &&
+    s.riichiSticks === 1 && s.scores[3] === 24000);
 }
 
 done();

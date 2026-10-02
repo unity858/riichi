@@ -6,7 +6,18 @@ Riichi mahjong game vibe coded with Claude
 npm start
 ```
 
-Open http://localhost:8080, pick a name, and create a room: you get a 6-character room code and an invite link (`?room=<code>`). Three more players join with the code or the link; the room's creator (the host) picks the settings and starts the match once all four seats are taken. Several rooms can play at once. Each browser tab is its own player, so you can test alone with 4 tabs; reloading a tab keeps its seat.
+Open http://localhost:8080, pick a name, and create a room: you get a 6-character room code and an invite link (`/game?room=<code>`). Three more players join with the code or the link; the room's creator (the host) picks the settings and starts the match once all four seats are taken. Several rooms can play at once. Each browser tab is its own player, so you can test alone with 4 tabs; reloading a tab keeps its seat.
+
+Pages:
+
+| Address | Page |
+| --- | --- |
+| `/` | the main page: pick a name, create or join a room |
+| `/game?room=<code>` | a room: its waiting room, then the table (this is the invite link) |
+| `/replays` | recent recorded matches, with a search |
+| `/replays/match?room=<code>&start=<time>` | one match's replay (not built yet) |
+
+Any other address redirects to the main page. Every link and file reference is relative to the site root (the server writes a relative `<base href>` into each page), so the game also works behind a proxy at a sub-path. The browser's Back and Forward buttons move between the pages; going Back out of a room leaves it (during a match the seat is kept for you).
 
 Match settings (chosen by the host before the start):
 

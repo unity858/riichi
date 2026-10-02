@@ -61,24 +61,51 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const RECORD = !process.env.NO_RECORD || process.env.NO_RECORD === '0';
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'matches.db');
 const recorder = RECORD ? openRecorder(DB_PATH) : null;
-const STATIC = new Set(['/index.html', '/style.css', '/ui.js', '/game.js', '/scoring.js']);
+const STATIC = new Set(['/style.css', '/ui.js', '/game.js', '/scoring.js']); // index.html is served for the pages below
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
 // Tile images, cut from riichi-mahjong-tiles-svg by tools/cut-tiles.mjs. Only plain names match,
 // so nothing outside tiles/ can be reached.
 const TILE_IMAGE = /^\/tiles\/tileset2\/[a-z0-9]+\.svg$/;
 
+// Page addresses. Each serves index.html, and the page shows the matching screen (see route() in
+// ui.js). Every link and file reference is relative to the site root, through a relative
+// <base href> that the server writes in for the page's depth: "./" for /game, "../" for
+// /replays/match. So nothing assumes the site sits at the top of its domain.
+//   /                                  the main page
+//   /replays                           recent matches, with a search
+//   /replays/match?room=<code>&start=<time>   one match's replay
+//   /game?room=<code>                  a room: its waiting room, then its table
+// Any other address is redirected to the main page (an old /?room=<code> link to its room).
+const PAGES = new Set(['/', '/replays', '/replays/match', '/game']);
+const toRoot = (pathname) => '../'.repeat(pathname.split('/').length - 2) || './';
+
+function redirect(res, location) {
+  res.writeHead(302, { Location: location }).end();
+}
+
 const server = http.createServer((req, res) => {
-  // Strip the query first: room links (and reloads) are /?room=<code>.
-  const pathname = req.url.split('?')[0];
-  const url = pathname === '/' ? '/index.html' : pathname;
-  const image = TILE_IMAGE.test(url);
-  if (!STATIC.has(url) && !image) {
-    res.writeHead(404).end('Not found');
+  const [pathname, query = ''] = req.url.split('?');
+  const room = new URLSearchParams(query).get('room');
+  if (pathname === '/' && room) return redirect(res, `game?room=${encodeURIComponent(room)}`);
+  if (PAGES.has(pathname)) {
+    fs.readFile(path.join(ROOT, 'index.html'), 'utf8', (err, html) => {
+      if (err) return res.writeHead(500).end('Error');
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+      res.end(html.replace('<base href="./">', `<base href="${toRoot(pathname)}">`));
+    });
     return;
   }
-  fs.readFile(path.join(ROOT, url), (err, data) => {
+  // The recorded matches, for the Recent matches page: [{ id, room, startedAt }], newest first.
+  if (pathname === '/api/matches') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ recording: !!recorder, matches: recorder?.listMatches() ?? [] }));
+    return;
+  }
+  const image = TILE_IMAGE.test(pathname);
+  if (!STATIC.has(pathname) && !image) return redirect(res, toRoot(pathname));
+  fs.readFile(path.join(ROOT, pathname), (err, data) => {
     if (err) return res.writeHead(image && err.code === 'ENOENT' ? 404 : 500).end(image ? 'Not found' : 'Error');
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(url)], ...(image ? { 'Cache-Control': 'max-age=86400' } : {}) });
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(pathname)], ...(image ? { 'Cache-Control': 'max-age=86400' } : {}) });
     res.end(data);
   });
 });

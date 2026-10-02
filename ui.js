@@ -5,7 +5,7 @@
 import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS } from './game.js';
 
 const $ = (id) => document.getElementById(id);
-const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table') };
+const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table'), matches: $('matches'), replay: $('replay') };
 const infoEl = $('info');
 const nextHandBtn = $('next-hand');
 const rematchBtn = $('rematch');
@@ -30,14 +30,28 @@ const seatEls = {
 // Relative position of each seat from your point of view (turn order goes to your right).
 const POSITIONS = ['bottom', 'right', 'top', 'left'];
 
+// --- Addresses ---
+// The site root comes from the page's <base href>, written in relative by the server (see PAGES
+// in server.js). It is fixed as an absolute address now, since a relative base would move with
+// every history.pushState. Every address the page uses is relative to it.
+const baseEl = document.querySelector('base');
+baseEl.href = baseEl.href; // absolute from here on
+const ROOT = new URL(baseEl.href);
+const rootPath = ROOT.pathname;
+
 // Game server to connect to, e.g. 'wss://riichi.example.com' when the page is hosted on
-// GitHub Pages. Empty means the server that served this page.
+// GitHub Pages. Empty means the server that served this page (its WebSocket at the site root).
 const SERVER_URL = '';
+const socketUrl = () => {
+  const url = new URL('.', ROOT);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  return url.href;
+};
 
 let view = null;
 // True after pressing Riichi, while choosing the tile to declare with.
 let choosingRiichi = false;
-const ws = new WebSocket(SERVER_URL || `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`);
+const ws = new WebSocket(SERVER_URL || socketUrl());
 
 // Each tab is its own player, so its id lives in sessionStorage: reloading keeps your seat,
 // and several tabs in one browser can sit at the same table. Your name is remembered.
@@ -49,34 +63,64 @@ const myName = () => {
   localStorage.setItem('riichiName', name);
   return name;
 };
-const roomInUrl = () => new URLSearchParams(location.search).get('room');
-const setUrlRoom = (code) => {
-  const url = new URL(location.href);
-  if (code) url.searchParams.set('room', code); else url.searchParams.delete('room');
-  history.replaceState(null, '', url);
-};
+// The page for the current address, relative to the site root: '' (the main page), 'replays',
+// 'replays/match' or 'game'; and its query.
+const route = () => (location.pathname.startsWith(rootPath) ? location.pathname.slice(rootPath.length) : '');
+const query = (key) => new URLSearchParams(location.search).get(key);
 
-ws.addEventListener('open', () => {
-  // Opening an invite link (or reloading) rejoins that room straight away if we have a name.
-  const code = roomInUrl();
-  if (code) $('join-code').value = code;
-  if (code && localStorage.getItem('riichiName')) send({ type: 'join', code, id: playerId, name: myName() });
-  else showScreen('lobby');
-});
+// Goes to an address relative to the site root, e.g. 'game?room=3fa9c1' or './' for the main
+// page, adding it to the history (or replacing the current entry), and shows its page.
+function navigate(address, { replace = false } = {}) {
+  history[replace ? 'replaceState' : 'pushState'](null, '', new URL(address, ROOT));
+  showRoute();
+}
+window.addEventListener('popstate', showRoute); // the browser's Back and Forward
+// The room this tab is in (from the server's 'joined'), so arriving at its address doesn't join again.
+let joinedCode = null;
+
+// Shows the page for the current address. Leaving /game (say with Back) leaves the room; during
+// a match the seat is kept, so Forward (or the link) takes it back.
+function showRoute() {
+  const page = route();
+  $('lobby-error').textContent = '';
+  if (page !== 'game' && joinedCode) send({ type: 'leave' });
+  if (page === 'game') {
+    const code = query('room');
+    if (!code) return navigate('./', { replace: true });
+    if (joinedCode === code) return view && render();
+    // Opening an invite link (or reloading) joins that room straight away if we have a name;
+    // otherwise the main page asks for one, with the code filled in.
+    $('join-code').value = code;
+    if (localStorage.getItem('riichiName')) send({ type: 'join', code, id: playerId, name: myName() });
+    else showScreen('lobby');
+  } else if (page === 'replays') {
+    openMatches();
+  } else if (page === 'replays/match') {
+    showReplay();
+  } else {
+    showScreen('lobby');
+  }
+}
+
+// The game page needs the server; the other pages show straight away (see the end of this file).
+ws.addEventListener('open', () => route() === 'game' && showRoute());
 ws.addEventListener('message', (e) => {
   const msg = JSON.parse(e.data);
-  if (msg.type === 'joined') setUrlRoom(msg.code);
-  else if (msg.type === 'left') {
+  if (msg.type === 'joined') {
+    joinedCode = msg.code;
+    // A room you created or joined: its address, unless you are already on it.
+    if (route() !== 'game' || query('room') !== msg.code) navigate(`game?room=${msg.code}`, { replace: route() === 'game' });
+  } else if (msg.type === 'left') {
+    joinedCode = null;
     view = null;
     clearTimeout(holdTimer);
     holdTimer = null;
-    setUrlRoom(null);
-    showScreen('lobby');
+    if (route() === 'game') navigate('./');
   } else if (msg.type === 'error') {
+    if (!view && route() === 'game') navigate('./', { replace: true });
     $('lobby-error').textContent = msg.message;
-    if (!view) showScreen('lobby');
   } else if (msg.type === 'state') {
-    showState(msg);
+    if (route() === 'game') showState(msg); // not after leaving with Back
   }
 });
 
@@ -212,7 +256,8 @@ const CONTEST_RULES = `
   <p><b>Up to three winners.</b> A win doesn't end the hand. The winner sits out the rest of it:
   play skips them, and they can't win again, call, or be dealt into. Several players can ron
   the same tile, which stays in the discarder's pond. The hand ends when three players have
-  won, when the wall runs out, on a yakuman, or on kyuushu kyuuhai (the only abortive draw).</p>
+  won, when the wall runs out, on a yakuman, or on kyuushu kyuuhai or suufon renda (the only
+  abortive draws). Any ron or tsumo before the fourth wind rules out suufon renda.</p>
   <p><b>What stays hidden.</b> A winner's hand stays hidden until the hand ends, with their
   Ron or Tsumo shown above their name. Their han are shown to everyone under "Baiman contest"
   straight away. The ura dora count for riichi winners as usual, but during the hand only a
@@ -230,7 +275,7 @@ const CONTEST_RULES = `
   match at once. It scores 0 points; the match is ranked by points as usual.</p>
   <p><b>The match.</b> Dealer repeats follow the "Dealer repeats (honba)" setting: either the
   dealer repeats only after winning a baiman or sanbaiman (a win worth a point), or the deal
-  always passes. Draws and kyuushu kyuuhai never repeat the dealer. Honba count the dealer's
+  always passes. Draws and abortive draws never repeat the dealer. Honba count the dealer's
   repeats in a row and are worth nothing. Going bust and sudden death don't apply; length and
   agari-yame do.</p>`;
 
@@ -317,6 +362,62 @@ const drawCreateSettings = () => renderSettings($('create-settings'), createSett
   drawCreateSettings();
 });
 drawCreateSettings();
+
+// --- Recent matches ---
+// The 10 most recent recorded matches matching the search, which looks for the text (any case)
+// in the room code or in the start time as shown, in this browser's own time zone.
+const MATCHES_SHOWN = 10;
+let recentMatches = [];
+const startTime = (iso) => new Date(iso).toLocaleString();
+function renderMatches() {
+  const q = $('matches-search').value.trim().toLowerCase();
+  const found = recentMatches.filter((m) => !q || m.room.toLowerCase().includes(q) || startTime(m.startedAt).toLowerCase().includes(q));
+  const body = $('matches-table').tBodies[0];
+  body.innerHTML = '';
+  for (const m of found.slice(0, MATCHES_SHOWN)) {
+    // Each cell links to the match's replay: replays/match?room=<code>&start=<time>.
+    const row = body.insertRow();
+    const address = `replays/match?${new URLSearchParams({ room: m.room, start: m.startedAt })}`;
+    for (const text of [startTime(m.startedAt), m.room]) {
+      const link = document.createElement('a');
+      link.href = address; // relative to the site root (the page's <base>)
+      link.textContent = text;
+      link.addEventListener('click', (e) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; // new tab etc.
+        e.preventDefault();
+        navigate(address);
+      });
+      row.insertCell().appendChild(link);
+    }
+  }
+  const more = found.length - MATCHES_SHOWN;
+  $('matches-note').textContent = !recentMatches.length ? 'No matches recorded yet.'
+    : !found.length ? 'No matches found.' : more > 0 ? `${more} more not shown: search to narrow them down.` : '';
+}
+async function openMatches() {
+  showScreen('matches');
+  $('matches-note').textContent = 'Loading…';
+  try {
+    const data = await (await fetch(new URL('api/matches', ROOT))).json();
+    recentMatches = data.matches;
+    renderMatches();
+    if (!data.recording) $('matches-note').textContent = 'This server is not recording matches.';
+  } catch {
+    $('matches-note').textContent = 'Could not load the matches.';
+  }
+}
+$('open-matches').addEventListener('click', () => navigate('replays'));
+$('matches-back').addEventListener('click', () => navigate('./'));
+
+// --- A match's replay (replays/match?room=<code>&start=<time>): not built yet ---
+function showReplay() {
+  const room = query('room');
+  const start = query('start');
+  $('replay-which').textContent = room && start ? `Room ${room}, started ${startTime(start)}` : 'No match given.';
+  showScreen('replay');
+}
+$('replay-back').addEventListener('click', () => navigate('replays'));
+$('matches-search').addEventListener('input', renderMatches);
 
 $('create').addEventListener('click', () => send({ type: 'create', id: playerId, name: myName(), settings: createSettings }));
 $('join').addEventListener('click', () => {
@@ -734,6 +835,7 @@ function statusText(game, you) {
   if (result?.type === 'abortiveDraw') {
     if (result.reason === 'suucha riichi') return 'Abortive draw: all four players declared riichi';
     if (result.reason === 'suukaikan') return 'Abortive draw: four kans by more than one player';
+    if (result.reason === 'suufon renda') return 'Abortive draw: all four players discarded the same wind';
     const [seat] = result.revealed;
     return `Abortive draw: ${seat === you ? 'you' : playerName(seat, game)} declared nine terminals and honors`;
   }
@@ -818,6 +920,7 @@ function renderDora(game) {
 }
 
 function render() {
+  if (!view || route() !== 'game') return; // the table only shows on the game page
   hidePreview(); // the tiles are redrawn, so any hover box or highlight is stale
   clearHighlight();
   const { you, game, room, match } = view;
@@ -934,3 +1037,6 @@ document.addEventListener('keydown', (e) => {
     send({ type: 'discard', tileId: me.drawn.id });
   }
 });
+
+// The page for the address this tab opened at (the game page waits for the server, above).
+if (route() !== 'game') showRoute();

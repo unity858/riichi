@@ -166,6 +166,36 @@ for (const how of ['tsumo', 'ron']) {
   check('so no kyuushu kyuuhai either, even on a first draw', s.current === 2 && !canKyuushu(s, 2));
 }
 
+// --- Suufon renda ---
+{
+  const winds = (s, n) => {
+    for (let i = 0; i < n; i++) {
+      discard(s, s.players[s.current].hand.find((t) => t.suit === 'z' && t.rank === 1).id);
+      passClaims(s);
+      draw(s);
+    }
+  };
+  const hand = '123456m2468p13s1z';
+  const s = contest({ hands: { 0: hand, 1: hand, 2: hand, 3: hand }, drawn: '9p' });
+  winds(s, 4);
+  check('suufon renda aborts a contest hand too', s.result?.type === 'abortiveDraw' && s.result.reason === 'suufon renda' &&
+    s.scores.join() === '0,0,0,0');
+  const m = newMatch(normalizeSettings({ format: 'baiman' }));
+  recordHand(m, s);
+  check('and never repeats the dealer', m.dealer === 1 && m.honba === 0);
+
+  // Seat 1 (in riichi with the wild tile, so not furiten on 1z) rons the dealer's East.
+  const r = contest({ hands: { 0: '12345m2468p13s11z', 1: '123m456p789s555m1A', 2: hand, 3: hand }, drawn: '9p' });
+  r.players[1].riichi = { turn: -1, discardIndex: 0, double: false, ippatsu: false };
+  discard(r, r.players[0].hand.find((t) => t.suit === 'z').id);
+  passClaims(r, 1);
+  claim(r, 1, 'ron');
+  draw(r);
+  winds(r, 3); // seats 2, 3 and 0, skipping the winner
+  check('a ron before the fourth wind rules it out', r.players[1].won?.type === 'ron' && r.result === null &&
+    r.discardLog.filter((d) => d.tile.suit === 'z').length === 4);
+}
+
 // --- Nagashi ---
 {
   let nagashiScores;

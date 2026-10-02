@@ -123,6 +123,12 @@ export function openRecorder(file) {
         }
       });
     },
+    // Recorded matches, newest first: { id, room, startedAt }. Matches played with DEBUG_SEED
+    // (test games) are left out.
+    listMatches() {
+      return db.prepare('SELECT id, room, started_at AS startedAt FROM matches WHERE debug = 0 ORDER BY id DESC').all()
+        .map((m) => ({ id: m.id, room: m.room, startedAt: m.startedAt }));
+    },
     close() {
       db.close();
     },

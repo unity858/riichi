@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Riichi Mahjong</title>
+  <!-- The site root, relative to this page: the server writes in the right one for each address
+       (see PAGES in server.js), and every reference below is relative to it. -->
+  <base href="./">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -24,6 +27,27 @@
       </section>
     </div>
     <p class="error" id="lobby-error"></p>
+    <p><button id="open-matches">Recent matches</button></p>
+  </main>
+
+  <!-- Recent matches: the server's recorded standard matches, newest first, with a search. -->
+  <main id="matches" class="screen" hidden>
+    <h1>Recent matches</h1>
+    <p><button id="matches-back">Back</button></p>
+    <label class="field">Search <input id="matches-search" placeholder="room code or start time" autocomplete="off"></label>
+    <table id="matches-table">
+      <thead><tr><th>Start time</th><th>Room code</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint" id="matches-note"></p>
+  </main>
+
+  <!-- One match's replay (replays/match?room=<code>&start=<time>): still to do. -->
+  <main id="replay" class="screen" hidden>
+    <h1>Match replay</h1>
+    <p><button id="replay-back">Back</button></p>
+    <p id="replay-which"></p>
+    <p class="hint">Todo: replays aren't shown yet.</p>
   </main>
 
   <!-- Waiting room: seats fill up, the host picks settings and starts. -->

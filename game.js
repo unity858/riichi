@@ -298,11 +298,13 @@ function settleRiichi(state) {
 }
 
 // Nobody took the discard: the next player draws, or the hand ends if the wall is empty.
-// Four kans by more than one player abort the hand once the fourth kan's discard passes.
+// Four kans by more than one player abort the hand once the fourth kan's discard passes, and
+// so does suufon renda once the fourth wind passes.
 function afterDiscard(state) {
   clearClaims(state);
   settleRiichi(state);
   if (state.phase === 'ended') return; // suucha riichi
+  if (isSuufonRenda(state)) return endHand(state, abortiveDraw('suufon renda', []));
   const kanOwners = state.players.filter((p) => p.melds.some((m) => m.type === 'kan')).length;
   if (state.rules.contest) {
     if (state.wall.length === 0) finishContest(state, 'wall');
@@ -318,10 +320,23 @@ function afterDiscard(state) {
 //   kyuushu kyuuhai: a player declares it on their first draw, before any call, holding at
 //                    least 9 different terminals and honors (it is optional);
 //   suucha riichi:   the fourth riichi stands (its discard is not ronned);
-//   suukaikan:       four kans by more than one player, once the fourth kan's discard passes.
+//   suukaikan:       four kans by more than one player, once the fourth kan's discard passes;
+//   suufon renda:    all four players discard the same wind as their first discard, with no
+//                    call, kan, ron or tsumo before it, once the fourth wind passes.
 // revealed: the seats whose hands are shown.
 function abortiveDraw(reason, revealed) {
   return { type: 'abortiveDraw', reason, revealed, deltas: [0, 0, 0, 0] };
+}
+
+// The first four discards are one per player, all the same wind, uninterrupted. A call, kan
+// or (Baiman contest) ron sets callMade; a contest tsumo leaves a winner who never discards.
+function isSuufonRenda(state) {
+  const log = state.discardLog;
+  if (log.length !== 4 || state.callMade || state.wins.length > 0) return false;
+  const [first] = log;
+  return first.tile.suit === 'z' && first.tile.rank <= 4 &&
+    log.every((d) => tileIndex(d.tile) === tileIndex(first.tile)) &&
+    new Set(log.map((d) => d.from)).size === 4;
 }
 
 export function canKyuushu(state, seat) {
@@ -741,7 +756,7 @@ export function calledTilePosition(meld, seat) {
 // until three players have won or the wall runs out. A ron interrupts like a call: it ends
 // ippatsu, double riichi, chiihou, renhou and kyuushu, and the discarder's nagashi. A yakuman
 // (kazoe or not) ends the hand at once, and the match with it (see match.js). There is no noten
-// payment and no abortive draw but kyuushu; nagashi scores like a win (1 point only as a
+// payment and no abortive draw but kyuushu and suufon renda; nagashi scores like a win (1 point only as a
 // baiman, with the yaku rebalance).
 
 export const CONTEST_LIMITS = ['Baiman', 'Sanbaiman'];
