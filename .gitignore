@@ -3,3 +3,6 @@ riichi-mahjong-tiles-svg/
 # Cut by tools/cut-tiles.mjs but not served by the game.
 tiles/tileset1/
 .DS_Store
+# The match database (see db.js) and SQLite's side files.
+matches.db
+matches.db-*

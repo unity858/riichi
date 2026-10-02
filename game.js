@@ -47,6 +47,9 @@ export function createWall() {
 }
 
 // Single point of tile -> display text. Swap for SVG later.
+// A tile in seed notation, as recorded in state.log: 1m-9m, 0m (red five), 1z-7z, 1A (wild).
+export const tileCode = (tile) => `${tile.red ? 0 : tile.rank}${tile.suit}`;
+
 export function tileLabel(tile) {
   if (isWild(tile)) return '1A';
   if (tile.suit === 'z') return HONOR_NAMES[tile.rank - 1];
@@ -156,6 +159,14 @@ export function newHand({
     kanPending: null, // { seat, type, tile, meldIndex } while others may rob a kan (chankan)
     robbed: null, // the tile won by chankan from an added kan (it is in no hand or meld)
     result: null, // set when the hand ends, see endHand()
+    // Every action that took effect, in order, for recording and replaying the hand (see
+    // replay.js): with the wall's order it determines the whole hand. Draws and passes follow
+    // from the rest, so they aren't listed. Tiles are written as in seeds: 5m, 0p (red), 7z.
+    //   { type: 'discard', seat, tile, tsumogiri, riichi }
+    //   { type: 'chii' | 'pon' | 'kan', seat, from, tile (the called one), tiles (from the hand) }
+    //   { type: 'ankan', seat, tiles } and { type: 'kakan', seat, tile } (declared; may be robbed)
+    //   { type: 'ron', seats, from, tile, chankan }, { type: 'tsumo', seat, tile }, { type: 'kyuushu', seat }
+    log: [],
     wins: [], // Baiman contest: every win so far this hand, in order (each player's won)
     // Baiman contest: the tile exchange before the first draw (see chooseExchange), while it lasts.
     exchange: rules.contest ? { picks: [null, null, null, null] } : null,
@@ -217,6 +228,8 @@ export function discard(state, tileId) {
   player.rinshan = false;
   player.callout = null;
   sortHand(player.hand);
+  const riichiDiscard = !!player.riichi && player.riichi.discardIndex === player.discards.length;
+  state.log.push({ type: 'discard', seat: player.seat, tile: tileCode(tile), tsumogiri: fromDraw, riichi: riichiDiscard });
   player.discards.push(tile);
   player.tsumogiri.push(fromDraw);
   player.called.push(false);
@@ -321,6 +334,7 @@ export function canKyuushu(state, seat) {
 
 export function declareKyuushu(state, seat) {
   if (!canKyuushu(state, seat)) return false;
+  state.log.push({ type: 'kyuushu', seat });
   endHand(state, abortiveDraw('kyuushu kyuuhai', [seat]));
   return true;
 }
@@ -534,6 +548,7 @@ export function tsumo(state, seat) {
   // Winning on the replacement tile after an open or added kan reveals its indicator first.
   revealPendingKanDora(state);
   const tile = state.players[seat].drawn;
+  state.log.push({ type: 'tsumo', seat, tile: tileCode(tile) });
   const score = scoreWin(state, seat, tile, true);
   if (state.rules.contest) {
     // The winning tile stays with the winner, hidden like the rest of their hand.
@@ -634,6 +649,7 @@ export function claim(state, seat, action, tiles = null) {
     .map(Number)
     .filter((s) => state.claims[s] === 'ron')
     .sort((a, b) => ((a - from + 4) % 4) - ((b - from + 4) % 4)); // turn order after the discarder
+  if (winners.length > 0) state.log.push({ type: 'ron', seats: winners, from, tile: tileCode(tile), chankan: !!chankan });
   if (winners.length > 0 && state.rules.contest) {
     contestRon(state, winners, tile, from, !!chankan);
   } else if (winners.length > 0) {
@@ -682,6 +698,7 @@ function makeCall(state, type, { seat, tiles: ids }) {
   const taken = ids.map((id) => caller.hand.splice(caller.hand.findIndex((t) => t.id === id), 1)[0]);
   const meld = { type, open: true, tiles: [tile, ...taken.sort(compareTiles)], from, calledId: tile.id };
   if (type === 'kan') meld.kanType = 'daiminkan';
+  state.log.push({ type: type === 'chi' ? 'chii' : type, seat, from, tile: tileCode(tile), tiles: taken.map(tileCode) });
   caller.melds.push(meld);
   clearRiichiCallouts(state);
   caller.callout = type === 'chi' ? 'chii' : type;
@@ -1001,12 +1018,14 @@ export function declareKan(state, seat, kind) {
   const take = (ids) => ids.map((id) => player.hand.splice(player.hand.findIndex((t) => t.id === id), 1)[0]);
   if (option.type === 'ankan') {
     const tiles = take(option.tiles).sort(compareTiles);
+    state.log.push({ type: 'ankan', seat, tiles: tiles.map(tileCode) });
     player.melds.push({ type: 'kan', kanType: 'ankan', open: false, tiles, from: seat, calledId: null });
     sortHand(player.hand);
     revealKanDora(state);
     state.kanPending = { seat, type: 'ankan', tile: tiles[0] };
   } else {
     const [tile] = take(option.tiles);
+    state.log.push({ type: 'kakan', seat, tile: tileCode(tile) });
     sortHand(player.hand);
     const meldIndex = player.melds.findIndex((m) => m.type === 'pon' && tileIndex(m.tiles[0]) === kind);
     state.kanPending = { seat, type: 'kakan', tile, meldIndex };

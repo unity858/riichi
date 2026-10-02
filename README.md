@@ -38,12 +38,34 @@ Environment variables, set before `npm start`; they can be combined:
 | `KAN_DRAW_MS` | pause after a kan, before the replacement tile (default 500) |
 | `DEBUG_SEED` | a fixed wall for every hand, from a seed file or a seed string (see below) |
 | `PORT` | the server port (default 8080) |
+| `DB_PATH` | where to record matches (default `matches.db` next to `server.js`; see below) |
+| `NO_RECORD=1` | don't record matches |
 
 ```
 NO_DELAYS=1 npm start                                 # no pauses at all
 DRAW_DELAY_MS=0 npm start                             # no pause before draws only
 NO_DELAYS=1 DEBUG_SEED=seeds/kan-manual.txt npm start # a fixed hand, no pauses
 ```
+
+## Recorded matches
+
+The server records every standard match (not Baiman contest ones) in an SQLite database, `matches.db`, using Node's built-in `node:sqlite` (no extra dependency). Each hand is stored as its wall's full order (the seed) plus every action in order: discards (marking riichi and tsumogiri), chii, pon and kan calls with the tiles they reveal, closed and added kans, ron, tsumo and kyuushu kyuuhai. Draws and passes follow from those, so with the seed they determine the hand completely. Actions are written as they happen, so even a hand cut off by a restart can be recovered up to its last action. Matches played with `DEBUG_SEED` are marked `debug`.
+
+| Table | One row per | Columns |
+| --- | --- | --- |
+| `matches` | match | `room`, `started_at`, `ended_at`, `settings`, `players`, `debug`, `final` |
+| `hands` | hand | `match_id`, `number`, `label`, `dealer`, `round_wind`, `honba`, `riichi_sticks`, `scores` (at the start), `rules`, `seed`, `started_at`, `ended_at`, `result` |
+| `actions` | action | `hand_id`, `seq`, `type`, `seat`, `data` (the whole action as JSON) |
+
+Times are ISO 8601 (UTC); JSON columns write tiles in seed notation (`5m`, `0p` for a red five, `7z`). `replay.js` rebuilds any hand from its row and actions, and `tools/replay.mjs` uses it:
+
+```
+node tools/replay.mjs list          # recorded matches
+node tools/replay.mjs match 3       # the hands of match 3
+node tools/replay.mjs hand 12       # hand 12 move by move, replayed and checked against its result
+```
+
+Or query it directly, e.g. `sqlite3 matches.db "SELECT label, json_extract(result, '$.type') FROM hands WHERE match_id = 3"`.
 
 ## Testing with a fixed wall (seeds)
 

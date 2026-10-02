@@ -20,6 +20,7 @@ import {
 } from './game.js';
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
+import { openRecorder } from './db.js';
 
 // Debugging: NO_DELAYS=1 removes every artificial pause: the three below (each can also be set
 // on its own) and, in the browser, the hold on a win before its result (see viewFor).
@@ -55,6 +56,11 @@ const SEED = (() => {
 
 const PORT = process.env.PORT || 8080;
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
+// Standard matches are recorded in an SQLite file (see db.js): DB_PATH sets where (default
+// matches.db next to this file), and NO_RECORD=1 turns recording off.
+const RECORD = !process.env.NO_RECORD || process.env.NO_RECORD === '0';
+const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'matches.db');
+const recorder = RECORD ? openRecorder(DB_PATH) : null;
 const STATIC = new Set(['/index.html', '/style.css', '/ui.js', '/game.js', '/scoring.js']);
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
 // Tile images, cut from riichi-mahjong-tiles-svg by tools/cut-tiles.mjs. Only plain names match,
@@ -353,6 +359,7 @@ function update(room) {
     room.state.recorded = true;
     recordHand(room.match, room.state);
   }
+  recorder?.sync(room); // new actions, then the result and the match's end once there
   broadcast(room);
   scheduleAutoPlay(room);
   scheduleAutoDiscard(room);
@@ -364,11 +371,14 @@ function startHand(room) {
   for (const p of room.seats) if (p) p.auto = normalizeAuto({});
   const wall = SEED ? wallFromSeed(SEED) : createWall();
   room.state = newHand({ ...handSettings(room.match), wall });
-  console.log(`[${room.code}] ${handLabel(room.match)}, ${room.match.honba} honba. Integrity: ${checkIntegrity(room.state)}. Seed: ${seedFromWall(wall)}`);
+  const seed = seedFromWall(wall);
+  recorder?.startHand(room, seed, handLabel(room.match));
+  console.log(`[${room.code}] ${handLabel(room.match)}, ${room.match.honba} honba. Integrity: ${checkIntegrity(room.state)}. Seed: ${seed}`);
 }
 
 function startMatch(room) {
   room.match = newMatch(room.settings);
+  recorder?.startMatch(room, { debug: !!SEED });
   startHand(room);
 }
 
@@ -526,4 +536,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => leaveRoom(ws));
 });
 
-server.listen(PORT, () => console.log(`Mahjong server on http://localhost:${PORT}${NO_DELAYS ? ' (NO_DELAYS: no pauses)' : ''}`));
+server.listen(PORT, () => {
+  console.log(`Mahjong server on http://localhost:${PORT}${NO_DELAYS ? ' (NO_DELAYS: no pauses)' : ''}`);
+  console.log(recorder ? `Recording standard matches in ${DB_PATH}` : 'Not recording matches (NO_RECORD)');
+});
