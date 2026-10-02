@@ -1,7 +1,7 @@
 // Run with: node test-win.js
 import { newHand, draw, discard, tsumo, claim, canTsumo, canRon, checkIntegrity, declareKan, chiiOptions } from './game.js';
 import { parse, table, stackWall, passClaims, check, done } from './test-helpers.js';
-import { furitenStatus, waitYaku, kindLabel } from './game.js';
+import { furitenStatus, waitYaku, kindLabel, discardPreview, tileIndex } from './game.js';
 
 {
   const s = table({ hands: { 0: '123m456p789s1122z' }, drawn: '1z' });
@@ -180,6 +180,27 @@ for (const [tile, can] of [['4s', true], ['1s', false]]) {
   s.doraIndicators = [];
   discard(s, s.players[0].drawn.id);
   check(`atozuke: ${can ? 'ron on the 4s (sanshoku doujun)' : 'no ron on the 1s (no yaku)'}`, canRon(s, 1) === can);
+}
+
+// --- Discard preview: the waits you would have after each discard ---
+{
+  const s = table({ hands: { 0: '123m456p789s23s55m' }, drawn: '7z' });
+  const before = JSON.stringify(s.players[0]);
+  const preview = discardPreview(s, 0);
+  const ids = Object.keys(preview).map(Number);
+  const chun = s.players[0].drawn.id;
+  const waits = (p) => p.waits.map((w) => `${kindLabel(w.kind)}:${w.ron ? 'ron' : w.tsumo ? 'tsumo' : 'none'}`).join(' ');
+  check('only tiles that leave you tenpai get a preview: here the Chun, waiting on 1s/4s (pinfu)',
+    ids.join() === String(chun) && waits(preview[chun]) === '1s:ron 4s:ron' && !preview[chun].furiten);
+  check('trying the discards changes nothing', JSON.stringify(s.players[0]) === before && checkIntegrity(s));
+  check('no preview on another player\'s turn', Object.keys(discardPreview(s, 1)).length === 0);
+}
+{
+  // Drawing a 4s: throwing it back keeps the same waits but you would be furiten on 4s.
+  const s = table({ hands: { 0: '123m456p789s23s55m' }, drawn: '4s' });
+  const fours = [...s.players[0].hand, s.players[0].drawn].filter((t) => kindLabel(tileIndex(t)) === '4s').map((t) => t.id);
+  const preview = discardPreview(s, 0);
+  check('discarding a tile you would wait on previews furiten', fours.every((id) => preview[id]?.furiten));
 }
 
 // --- Furiten ---

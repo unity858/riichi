@@ -94,6 +94,10 @@ export function newHand({
     // Set on declaration: { turn, discardIndex, double, ippatsu }. turn is state.turnCount
     // when declared, discardIndex the riichi tile's index in discards.
     riichi: null,
+    // The player's latest call, shown briefly above their name: 'chii' | 'pon' | 'kan' |
+    // 'riichi' | 'ron' | 'tsumo', or null. It clears when they next discard; a riichi (whose
+    // discard is the call) clears at the next draw or call instead.
+    callout: null,
   }));
 
   // Deal in real order starting from the dealer: 3 rounds of 4 tiles each, then 1 tile each.
@@ -151,6 +155,7 @@ export function draw(state) {
     return null;
   }
   const tile = state.wall.shift();
+  clearRiichiCallouts(state);
   state.players[state.current].drawn = tile;
   state.phase = 'discard';
   return tile;
@@ -182,6 +187,7 @@ export function discard(state, tileId) {
   }
   player.drawn = null;
   player.rinshan = false;
+  player.callout = null;
   sortHand(player.hand);
   player.discards.push(tile);
   player.tsumogiri.push(fromDraw);
@@ -217,6 +223,10 @@ export function discard(state, tileId) {
     afterDiscard(state);
   }
   return tile;
+}
+
+function clearRiichiCallouts(state) {
+  for (const p of state.players) if (p.callout === 'riichi') p.callout = null;
 }
 
 function clearClaims(state) {
@@ -347,6 +357,41 @@ export function waitYaku(state, seat) {
   }));
 }
 
+// For the current player on their turn: each tile they could discard to be tenpai, with the
+// waits they would then have (as from waitYaku) and whether they would be furiten. After the
+// discard that tile counts among their discards and riichi furiten carries over; a discard of
+// their own ends temporary furiten. { [tileId]: { waits: [{ kind, ron, tsumo }], furiten } }
+// Works by trying each discard on the player's tiles and putting them back.
+export function discardPreview(state, seat) {
+  const player = state.players[seat];
+  if (state.phase !== 'discard' || state.current !== seat) return {};
+  const tiles = [...player.hand, ...(player.drawn ? [player.drawn] : [])];
+  if (tiles.length % 3 !== 2) return {};
+  const saved = { hand: player.hand, drawn: player.drawn, discards: player.discards, rinshan: player.rinshan };
+  const byKind = new Map();
+  const preview = {};
+  try {
+    for (const tile of tiles) {
+      const kind = tileIndex(tile);
+      if (!byKind.has(kind)) {
+        player.hand = tiles.filter((t) => t !== tile);
+        player.drawn = null;
+        player.rinshan = false;
+        player.discards = [...saved.discards, tile];
+        const waits = waitYaku(state, seat);
+        const discarded = new Set(player.discards.map(tileIndex));
+        const sinceRiichi = player.riichi ? discardedAfter(state, player.riichi.turn) : new Set();
+        const furiten = waits.some((w) => discarded.has(w.kind) || sinceRiichi.has(w.kind));
+        byKind.set(kind, waits.length ? { waits, furiten } : null);
+      }
+      if (byKind.get(kind)) preview[tile.id] = byKind.get(kind);
+    }
+  } finally {
+    Object.assign(player, saved);
+  }
+  return preview;
+}
+
 // Scores seat's win on tile (see scoring.js), with their melds. A tsumo on a replacement tile
 // is rinshan kaihou; chankan is a ron on a tile robbed from a kan.
 function scoreWin(state, seat, tile, tsumo, { chankan = false } = {}) {
@@ -424,6 +469,7 @@ export function tsumo(state, seat) {
   const deltas = pointDeltas(score, { winner: seat, dealer: state.dealer, from: null, tsumo: true });
   const sticks = collectSticks(state, seat, deltas);
   const honbaBonus = payHonba(state, seat, null, deltas);
+  state.players[seat].callout = 'tsumo';
   endHand(state, {
     type: 'tsumo', winners: [seat], scores: [score], tile, from: null, deltas, sticks, honbaBonus, ...revealUra(state, [seat]),
   });
@@ -530,6 +576,7 @@ export function claim(state, seat, action, tiles = null) {
       pointDeltas(score, { winner: winners[i], dealer: state.dealer, from, tsumo: false })));
     const sticks = collectSticks(state, winners[0], deltas);
     const honbaBonus = payHonba(state, winners[0], from, deltas);
+    for (const w of winners) state.players[w].callout = 'ron';
     endHand(state, { type: 'ron', winners, scores, tile, from, deltas, sticks, honbaBonus, chankan: !!chankan, ...revealUra(state, winners) });
   } else if (state.kanPending) {
     finishKan(state); // nobody robbed the kan
@@ -559,6 +606,8 @@ function makeCall(state, type, { seat, tiles: ids }) {
   const meld = { type, open: true, tiles: [tile, ...taken.sort(compareTiles)], from, calledId: tile.id };
   if (type === 'kan') meld.kanType = 'daiminkan';
   caller.melds.push(meld);
+  clearRiichiCallouts(state);
+  caller.callout = type === 'chi' ? 'chii' : type;
   const discarder = state.players[from];
   discarder.called[discarder.discards.length - 1] = true;
 
@@ -620,6 +669,7 @@ function drawRinshan(state) {
   state.rinshanUsed++;
   state.deadWall.push(state.wall.pop());
   const player = state.players[state.current];
+  clearRiichiCallouts(state);
   player.drawn = tile;
   player.rinshan = true;
   state.phase = 'discard';
@@ -724,6 +774,7 @@ export function declareKan(state, seat, kind) {
   player.hand.push(player.drawn);
   player.drawn = null;
   player.rinshan = false;
+  player.callout = 'kan';
   const take = (ids) => ids.map((id) => player.hand.splice(player.hand.findIndex((t) => t.id === id), 1)[0]);
   if (option.type === 'ankan') {
     const tiles = take(option.tiles).sort(compareTiles);
@@ -808,6 +859,7 @@ export function declareRiichi(state, seat, tileId) {
   };
   state.pendingRiichi = seat;
   discard(state, tileId);
+  player.callout = 'riichi';
   return true;
 }
 

@@ -63,16 +63,56 @@ ws.addEventListener('message', (e) => {
   if (msg.type === 'joined') setUrlRoom(msg.code);
   else if (msg.type === 'left') {
     view = null;
+    clearTimeout(holdTimer);
+    holdTimer = null;
     setUrlRoom(null);
     showScreen('lobby');
   } else if (msg.type === 'error') {
     $('lobby-error').textContent = msg.message;
     if (!view) showScreen('lobby');
   } else if (msg.type === 'state') {
-    view = msg;
-    render();
+    showState(msg);
   }
 });
+
+// When a hand is won by ron or tsumo, the table stays as it was for CALLOUT_HOLD_MS with the
+// winners' callouts showing, and nothing can be clicked; then the result is shown. States that
+// arrive meanwhile are kept, and the latest one is shown when the pause ends.
+const CALLOUT_HOLD_MS = 1000;
+let holdTimer = null;
+let latestState = null;
+function showState(msg) {
+  latestState = msg;
+  if (holdTimer) return;
+  const playing = view?.game && view.game.phase !== 'ended';
+  if (playing && ['ron', 'tsumo'].includes(msg.game?.result?.type)) {
+    view = heldView(view, msg);
+    render();
+    holdTimer = setTimeout(() => {
+      holdTimer = null;
+      view = latestState;
+      render();
+    }, CALLOUT_HOLD_MS);
+    return;
+  }
+  view = msg;
+  render();
+}
+
+// The previous table with the new callouts and no actions available.
+function heldView(before, after) {
+  const game = before.game;
+  return {
+    ...before,
+    game: {
+      ...game,
+      phase: 'held',
+      players: game.players.map((p, i) => ({ ...p, callout: after.game.players[i].callout })),
+      canTsumo: false, canRon: false, canKyuushu: false, autoDiscarding: false,
+      ponOptions: [], chiiOptions: [], openKanOptions: [], kanOptions: [], riichiDiscards: [], discardPreview: {},
+    },
+  };
+}
 ws.addEventListener('close', () => {
   document.body.insertAdjacentHTML('afterbegin', '<p class="banner">Disconnected from the server. Reload the page to reconnect.</p>');
 });
@@ -203,8 +243,57 @@ function renderWaiting() {
       : 'Waiting for the host to start the match.';
 }
 
+// Fills a waits display: each wait as a tile, noting if winning on it has no yaku or only by
+// tsumo (atozuke), then a single "(furiten)" for the whole hand. Used by your waits line and
+// by the discard preview.
+function fillWaits(container, waits, furiten) {
+  container.append('Tenpai:');
+  for (const w of waits) {
+    const item = document.createElement('span');
+    item.className = 'wait';
+    item.appendChild(tileEl(tileOfKind(w.kind)));
+    if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
+    container.appendChild(item);
+  }
+  if (furiten) {
+    const tag = document.createElement('span');
+    tag.className = 'furiten-tag';
+    tag.textContent = '(furiten)';
+    container.appendChild(tag);
+  }
+}
+
+// Hovering a tile you could discard into tenpai shows the waits you would have, in a small box
+// just above the tile (it may cover other things).
+const previewBox = document.createElement('div');
+previewBox.className = 'waits wait-preview';
+previewBox.hidden = true;
+document.body.appendChild(previewBox);
+function showPreview(tileElement, preview) {
+  previewBox.innerHTML = '';
+  fillWaits(previewBox, preview.waits, preview.furiten);
+  previewBox.hidden = false;
+  const rect = tileElement.getBoundingClientRect();
+  const top = rect.top + window.scrollY - previewBox.offsetHeight - 6;
+  previewBox.style.left = `${Math.max(4, rect.left + window.scrollX + rect.width / 2 - previewBox.offsetWidth / 2)}px`;
+  previewBox.style.top = `${Math.max(4, top)}px`;
+}
+const hidePreview = () => (previewBox.hidden = true);
+
+// Outlines every other visible tile of the same kind as the hovered one: in hands, melds,
+// ponds, the dora panel and the waits line. Face-down tiles have no kind and never match.
+function highlightKind(el) {
+  for (const other of document.querySelectorAll(`.tile[data-kind="${el.dataset.kind}"]`)) {
+    if (other !== el) other.classList.add('same-kind');
+  }
+}
+function clearHighlight() {
+  for (const other of document.querySelectorAll('.tile.same-kind')) other.classList.remove('same-kind');
+}
+
 // clickable discards the tile, or declares riichi with it while choosing a riichi tile.
-function tileEl(tile, { clickable = false, extraClass = '' } = {}) {
+// preview (waits after discarding it, from the server) shows on hover.
+function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {}) {
   const el = document.createElement('div');
   if (!tile) {
     el.className = 'tile back';
@@ -212,6 +301,14 @@ function tileEl(tile, { clickable = false, extraClass = '' } = {}) {
   }
   el.className = `tile ${tile.suit}${tile.red ? ' red' : ''} ${extraClass}`.trim();
   el.textContent = tileLabel(tile);
+  // Hovering a face-up tile outlines every other visible copy of it (see highlightKind).
+  el.dataset.kind = `${tile.rank}${tile.suit}`; // a red five is a five here
+  el.addEventListener('mouseenter', () => highlightKind(el));
+  el.addEventListener('mouseleave', clearHighlight);
+  if (preview) {
+    el.addEventListener('mouseenter', () => showPreview(el, preview));
+    el.addEventListener('mouseleave', hidePreview);
+  }
   if (clickable) {
     el.classList.add('clickable');
     el.addEventListener('click', () => {
@@ -253,6 +350,8 @@ function playerName(seat, game) {
   return `${seatWind(seat, game.dealer)} (${nameOf(seat)})`;
 }
 
+const CALLOUT_LABELS = { chii: 'Chii', pon: 'Pon', kan: 'Kan', riichi: 'Riichi', ron: 'Ron', tsumo: 'Tsumo' };
+
 function renderSeat(el, player, game, you) {
   el.innerHTML = '';
   // The player whose turn it is gets a bold name line and a highlighted seat. After a discard
@@ -281,17 +380,25 @@ function renderSeat(el, player, game, you) {
     name.innerHTML += ` <span class="riichi-tag">${player.riichi.double ? 'Double riichi' : 'Riichi'}` +
       `${player.riichi.ippatsu && !result ? ' · Ippatsu' : ''}</span>`;
   }
+  if (player.callout) {
+    const box = document.createElement('div');
+    box.className = `callout callout-${player.callout}`;
+    box.textContent = CALLOUT_LABELS[player.callout];
+    name.appendChild(box);
+  }
   el.appendChild(name);
 
   const hand = document.createElement('div');
   hand.className = 'hand';
   const clickable = (t) => canClickTile(t, player, game, you);
+  // Your tiles you could discard into tenpai show the waits that would leave on hover.
+  const preview = (t) => (player.seat === you && clickable(t) ? game.discardPreview?.[t.id] ?? null : null);
   const dim = (t) => (choosingRiichi && player.seat === you && !clickable(t) ? ' dimmed' : '');
   if (player.hand) {
-    player.hand.forEach((t) => hand.appendChild(tileEl(t, { clickable: clickable(t), extraClass: dim(t).trim() })));
+    player.hand.forEach((t) => hand.appendChild(tileEl(t, { clickable: clickable(t), extraClass: dim(t).trim(), preview: preview(t) })));
     if (player.drawn) {
       const extra = (won ? 'drawn win-tile' : 'drawn last-drawn') + dim(player.drawn);
-      hand.appendChild(tileEl(player.drawn, { clickable: clickable(player.drawn), extraClass: extra }));
+      hand.appendChild(tileEl(player.drawn, { clickable: clickable(player.drawn), extraClass: extra, preview: preview(player.drawn) }));
     } else if (won && result.type === 'ron') {
       hand.appendChild(tileEl(result.tile, { extraClass: 'drawn win-tile' }));
     }
@@ -335,28 +442,11 @@ function renderSeat(el, player, game, you) {
     // Each wait is shown as a tile, noting if winning on it has no yaku or only by tsumo
     // (atozuke: a hand may have a yaku on only some of its waits). Furiten belongs to the
     // whole hand, so a single "(furiten)" comes after all the waits.
-    const waits = game.waits;
     const line = document.createElement('div');
     line.className = 'waits';
-    if (!waits.length) {
-      line.textContent = 'Not tenpai';
-    } else {
-      line.append('Tenpai:');
-      for (const w of waits) {
-        const item = document.createElement('span');
-        item.className = 'wait';
-        item.appendChild(tileEl(tileOfKind(w.kind)));
-        if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
-        line.appendChild(item);
-      }
-      const f = game.furiten;
-      if (f && (f.discard || f.temporary || f.riichi)) {
-        const tag = document.createElement('span');
-        tag.className = 'furiten-tag';
-        tag.textContent = '(furiten)';
-        line.appendChild(tag);
-      }
-    }
+    const f = game.furiten;
+    if (!game.waits.length) line.textContent = 'Not tenpai';
+    else fillWaits(line, game.waits, !!(f && (f.discard || f.temporary || f.riichi)));
     el.appendChild(line);
   }
 
@@ -436,7 +526,7 @@ function statusText(game, you) {
   }
   // Whose turn it is shows as a bold name line, not here. The pause before a draw (which is
   // also how others deciding on a call look) has no status text.
-  if (game.phase === 'draw') return '';
+  if (game.phase === 'draw' || game.phase === 'held') return ''; // held: the pause before a win's result
   if (game.phase === 'rinshan') return game.current === you ? 'Kan: drawing a replacement tile…' : '';
   if (game.phase === 'claim') {
     const tile = tileLabel(game.lastDiscard.tile);
@@ -479,6 +569,8 @@ function renderDora(game) {
 }
 
 function render() {
+  hidePreview(); // the tiles are redrawn, so any hover box or highlight is stale
+  clearHighlight();
   const { you, game, room, match } = view;
   if (!room.started) {
     showScreen('waiting');

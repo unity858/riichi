@@ -73,7 +73,7 @@ button.call-kan { color: #f0f; }
 #riichi { background: #ffa500; color: #000; font-weight: bold; }
 #kyuushu { color: #777; font-style: italic; }
 
-.seat-name { font-size: 0.9em; font-weight: normal; }
+.seat-name { font-size: 0.9em; font-weight: normal; position: relative; }
 .seat.active .seat-name { font-weight: bold; } /* whose turn it is */
 .seat-name .dealer { color: #d32f2f; }
 .seat-name .delta.gain { color: #2e7d32; }
@@ -132,6 +132,8 @@ button.call-kan { color: #f0f; }
 .tile.clickable { cursor: pointer; }
 .tile.clickable:hover { transform: translateY(-6px); }
 .tile.last-drawn { outline: 2px solid #e0a800; }
+/* Other visible copies of a hovered tile; the red outlines (callable, winning tile) win. */
+.tile.same-kind { outline: 3px solid #555; }
 .tile.win-tile, .tile.claim-tile { outline: 3px solid #d32f2f; }
 .tile.dimmed { opacity: 0.35; }
 .pond .tile.riichi-tile { transform: rotate(90deg); margin: 0 5px; }
@@ -186,3 +188,41 @@ button.selected { outline: 2px solid #1565c0; }
 .rule-details p { margin: 6px 0; }
 .rule-details table { border-collapse: collapse; margin: 4px 0; }
 .rule-details td, .rule-details th { border: 1px solid #ccc; padding: 2px 6px; text-align: left; }
+
+/* The waits shown when hovering a tile you could discard into tenpai. */
+.wait-preview {
+  position: absolute;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #999;
+  border-radius: 6px;
+  padding: 4px 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+
+/* A player's latest call, in a small box above their name until they next discard. */
+.callout {
+  position: absolute;
+  bottom: calc(100% + 2px);
+  left: 0;
+  z-index: 15;
+  min-width: 30px;
+  height: 20px;
+  padding: 0 4px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: bold;
+  text-align: center;
+  background: #fff;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+.callout-chii, .callout-pon { color: #00f; }
+.callout-kan { color: #f0f; }
+.callout-riichi { color: #000; background: #ffa500; border-color: #c77d00; }
+.callout-ron, .callout-tsumo { color: #fff; background: #d32f2f; border-color: #d32f2f; }

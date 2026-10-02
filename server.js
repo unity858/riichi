@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
-  canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions, waitYaku,
+  canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions, waitYaku, discardPreview,
   autoDiscardDue, furitenStatus, createWall, checkIntegrity,
 } from './game.js';
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
@@ -141,6 +141,7 @@ function gameView(state, seat) {
     autoDiscarding: me !== null && state.current === me && autoDiscardDue(state),
     furiten: me !== null ? furitenStatus(state, me) : null, // your own only: it reveals your waits
     waits: me !== null ? waitYaku(state, me) : [], // your own only, likewise: [{ kind, ron, tsumo }]
+    discardPreview: me !== null ? discardPreview(state, me) : {}, // on your turn: waits after each discard
     players: state.players.map((p) => ({
       seat: p.seat,
       discards: p.discards,
@@ -152,6 +153,7 @@ function gameView(state, seat) {
       hand: visible(p) ? p.hand : null,
       drawn: visible(p) ? p.drawn : null,
       riichi: p.riichi, // { turn, discardIndex, double, ippatsu } is public knowledge
+      callout: p.callout, // set only once a call has happened, so it reveals nothing early
     })),
   };
 }
