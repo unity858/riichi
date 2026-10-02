@@ -2,7 +2,7 @@
 // Three screens: the lobby (name, create or join a room), the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, tileIndex, calledTilePosition, WINDS } from './game.js';
+import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS } from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table') };
@@ -15,6 +15,9 @@ const tsumoBtn = document.getElementById('tsumo');
 const kyuushuBtn = $('kyuushu');
 const ronBtn = document.getElementById('ron');
 const passBtn = document.getElementById('pass');
+const exchangeBtn = $('exchange');
+// Baiman contest tile exchange: the tiles (by id) you have selected to pass, before sending them.
+let exchangePicks = new Set();
 const callOptionsEl = document.getElementById('call-options');
 const autoEl = $('auto-settings');
 const autoBoxes = [...autoEl.querySelectorAll('input[data-auto]')];
@@ -77,7 +80,7 @@ ws.addEventListener('message', (e) => {
   }
 });
 
-// When a hand is won by ron or tsumo, the table stays as it was for CALLOUT_HOLD_MS with the
+// When a hand is won by ron or tsumo (or a Baiman contest hand ends on its third win), the table stays as it was for CALLOUT_HOLD_MS with the
 // winners' callouts showing, and nothing can be clicked; then the result is shown. States that
 // arrive meanwhile are kept, and the latest one is shown when the pause ends. The server's
 // NO_DELAYS flag turns this off.
@@ -88,7 +91,9 @@ function showState(msg) {
   latestState = msg;
   if (holdTimer) return;
   const playing = view?.game && view.game.phase !== 'ended';
-  if (playing && !msg.noDelays && ['ron', 'tsumo'].includes(msg.game?.result?.type)) {
+  const result = msg.game?.result;
+  const byWin = ['ron', 'tsumo'].includes(result?.type) || (result?.type === 'contest' && result.reason === 'three winners');
+  if (playing && !msg.noDelays && byWin) {
     view = heldView(view, msg);
     render();
     holdTimer = setTimeout(() => {
@@ -131,13 +136,19 @@ function showScreen(name) {
 // --- Settings ---
 
 const SETTING_FIELDS = [
-  { key: 'length', label: 'Length', options: [['east', 'East only (tonpuusen)'], ['south', 'East + South (hanchan)']] },
-  { key: 'bust', label: 'End the match when someone goes below 0' },
-  { key: 'extension', label: 'Sudden death: if nobody has 30,000 at the end, play on into the next wind' },
+  { key: 'format', label: 'Format', radios: [['standard', 'Standard'], ['baiman', 'Baiman contest']] },
+  { key: 'length', label: 'Length', radios: [['east', 'East only (tonpuusen)'], ['south', 'East + South (hanchan)']] },
+  // standardOnly: hidden for the Baiman contest, where they are always off (see match.js).
+  { key: 'bust', label: 'End the match when someone goes below 0', standardOnly: true },
+  { key: 'extension', label: 'Sudden death: if nobody has 30,000 at the end, play on into the next wind', standardOnly: true },
   { key: 'agariYame', label: 'Agari-yame: a last-hand dealer in first place may end the match' },
   { key: 'yakuRebalance', label: 'Yaku rebalance (house rules)' },
+  { key: 'noHints', label: 'No hints: no waits, tile highlighting or ippatsu shown' },
+  // contestOnly: shown only for the Baiman contest.
+  { key: 'contestRepeat', label: 'Dealer repeats (honba)', contestOnly: true,
+    radios: [['baiman', 'Only when the dealer wins a baiman or sanbaiman'], ['none', 'Never']] },
 ];
-const DEFAULT_SETTINGS = { length: 'south', bust: true, extension: true, agariYame: true, yakuRebalance: false };
+const DEFAULT_SETTINGS = { format: 'standard', length: 'south', bust: true, extension: true, agariYame: true, yakuRebalance: false, noHints: false, contestRepeat: 'baiman' };
 
 // The rule details shown under the settings, folded away until clicked.
 const RULE_DETAILS = `
@@ -153,7 +164,7 @@ const RULE_DETAILS = `
   <p><b>Yaku rebalance.</b> House values for a few yaku:</p>
   <table>
     <tr><th>Yaku</th><th>Standard</th><th>Rebalanced</th></tr>
-    <tr><td>Nagashi mangan</td><td>mangan</td><td>baiman (still combines with nothing)</td></tr>
+    <tr><td>Nagashi</td><td>mangan</td><td>baiman (still combines with nothing)</td></tr>
     <tr><td>Sankantsu (three kans)</td><td>2 han</td><td>yakuman</td></tr>
     <tr><td>Suukantsu (four kans)</td><td>yakuman</td><td>double yakuman</td></tr>
     <tr><td>Sanshoku doukou</td><td>2 han</td><td>3 han</td></tr>
@@ -162,32 +173,108 @@ const RULE_DETAILS = `
       <td>8 han (baiman), counting no other yaku or dora; if the hand is worth more without it, that score is used</td></tr>
     <tr><td>Shoutate: triplets of one number in two suits and a pair of it in the third</td><td>(none)</td><td>2 han</td></tr>
   </table>
+  <p><b>No hints.</b> Hides everything that only helps: your waits and the tiles left (under your
+  hand and on hovering a discard), furiten, the outline on other copies of a hovered tile, the
+  outline on your drawn tile and on a discard you can call, the shading of tsumogiri discards,
+  the dimming of tiles you can't riichi with, and ippatsu. Discards that were called stay dark
+  gray, "Riichi" and "Double riichi" still show, and the Riichi, Tsumo, Ron and call buttons
+  still appear when those are possible.</p>
   <p><b>Always on.</b> Honba go up on a dealer repeat and on every draw, reset after a
   non-dealer win, and add 300 each to a win. Riichi sticks left at the end go to first place.
   Open tanyao, double ron, and Mahjong Soul's double yakuman (13-sided kokushi, 9-sided
-  chuuren, suuankou tanki, daisuushi) are on. A win needs at least one yaku.</p>`;
+  chuuren, suuankou tanki, daisuushi) are on. A win needs at least one yaku.</p>
+  <p><b>Baiman contest.</b> See its "Detailed rules" next to the format.</p>`;
+
+// The Baiman contest's rules, folded away next to the format choice.
+const CONTEST_RULES = `
+  <p><b>Points.</b> Everyone starts on 0. A win worth a baiman (8-10 han) or sanbaiman (11-12
+  han) scores 1 point, counted as soon as it is won; any other win scores 0. Fu don't matter
+  and aren't shown. Nobody ever loses points: not for dealing in, not when someone else wins
+  by tsumo, and riichi is free (no 1,000-point stick, so you can riichi on 0). There are no
+  noten payments and honba add nothing.</p>
+  <p><b>The wild tile.</b> Every hand deals each player one wild tile (1A) as their 13th tile,
+  on top of the usual 136. It can never be discarded, and it is only used for winning: a hand
+  wins (by ron or tsumo) if the wild tile can stand for some tile that completes it. It can be
+  any of the 34 kinds, but never a red five, even a kind whose four copies are all elsewhere.
+  The win is always scored as whichever kind gives the most han, and that kind counts for dora
+  (so an extra dora can push a hand past sanbaiman). Your waits are every tile that wins for
+  some value of the wild tile. A hand whose other tiles are already complete sets wins on any
+  tile, and six different pairs win on any of the 28 other kinds (seven pairs must be distinct);
+  either way the waits are shown as the wild tile alone. Since such a hand waits on nearly
+  everything, it is almost always furiten and has to win by tsumo. Riichi, pon, chii and kan use
+  your other tiles as usual.</p>
+  <p><b>The tile exchange.</b> Each hand starts, before the dealer's first draw, with every player
+  choosing exactly three tiles to pass (never the wild tile): click them, then "Pass 3 tiles".
+  Once all four have chosen, each player's three tiles go to a randomly chosen other player
+  (a random derangement: nobody gets their own back). Who passed to whom is then shown under
+  the round, e.g. "Tile passes: E -> S, S -> W, W -> N, N -> E", for the rest of the hand.
+  Then play starts as usual. It makes rare hands, flushes in particular, easier to build.</p>
+  <p><b>Up to three winners.</b> A win doesn't end the hand. The winner sits out the rest of it:
+  play skips them, and they can't win again, call, or be dealt into. Several players can ron
+  the same tile, which stays in the discarder's pond. The hand ends when three players have
+  won, when the wall runs out, on a yakuman, or on kyuushu kyuuhai (the only abortive draw).</p>
+  <p><b>What stays hidden.</b> A winner's hand stays hidden until the hand ends, with their
+  Ron or Tsumo shown above their name. Their han are shown to everyone under "Baiman contest"
+  straight away. The ura dora count for riichi winners as usual, but during the hand only a
+  player who has won in riichi can see them. Everything is shown when the hand ends.</p>
+  <p><b>A ron interrupts like a call.</b> It ends every riichi player's ippatsu and the
+  uninterrupted first go-around (so no double riichi, chiihou, renhou or kyuushu kyuuhai after
+  it), and the discarder loses nagashi. A tsumo by another player doesn't.</p>
+  <p><b>Robbing a kan.</b> As usual, any winning hand can rob an added kan (chankan), and only
+  kokushi can rob a closed kan. After a robbed added kan the kan player plays on, as if they had
+  discarded the tile; kokushi is a yakuman, so it ends the hand and the match.</p>
+  <p><b>Nagashi.</b> At the end of the wall, a player who hasn't won and whose discards
+  are all terminals and honors, none of them called or ronned, scores it like a win: a mangan
+  (0 points), or a baiman (1 point) with the yaku rebalance.</p>
+  <p><b>Yakuman.</b> Any yakuman, including a kazoe yakuman (13+ han), ends the hand and the
+  match at once. It scores 0 points; the match is ranked by points as usual.</p>
+  <p><b>The match.</b> Dealer repeats follow the "Dealer repeats (honba)" setting: either the
+  dealer repeats only after winning a baiman or sanbaiman (a win worth a point), or the deal
+  always passes. Draws and kyuushu kyuuhai never repeat the dealer. Honba count the dealer's
+  repeats in a row and are worth nothing. Going bust and sudden death don't apply; length and
+  agari-yame do.</p>`;
 
 // Fills container with the settings; editable ones call onChange with the new settings.
 function renderSettings(container, settings, editable, onChange) {
   container.innerHTML = '';
   for (const field of SETTING_FIELDS) {
+    if (field.standardOnly && settings.format === 'baiman') continue;
+    if (field.contestOnly && settings.format !== 'baiman') continue;
+    if (field.radios) {
+      // Exactly one choice, as radio buttons.
+      const row = document.createElement('div');
+      row.className = 'setting setting-radios';
+      row.append(`${field.label}: `);
+      for (const [value, text] of field.radios) {
+        const label = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = `${container.id}-${field.key}`;
+        input.checked = settings[field.key] === value;
+        input.disabled = !editable;
+        input.addEventListener('change', () => onChange({ ...settings, [field.key]: value }));
+        label.append(input, ` ${text}`);
+        row.appendChild(label);
+        if (field.key === 'format' && value === 'baiman') row.appendChild(contestRulesToggle(container));
+      }
+      container.appendChild(row);
+      if (field.key === 'format' && detailsOpen[`${container.id}-contest`]) {
+        const rules = document.createElement('div');
+        rules.className = 'rule-details contest-rules';
+        rules.innerHTML = CONTEST_RULES;
+        container.appendChild(rules);
+      }
+      continue;
+    }
+    // Everything else is an on/off checkbox.
     const row = document.createElement('label');
     row.className = 'setting';
-    let input;
-    if (field.options) {
-      input = document.createElement('select');
-      for (const [value, text] of field.options) input.add(new Option(text, value, false, settings[field.key] === value));
-      row.append(`${field.label} `, input);
-    } else {
-      input = document.createElement('input');
-      input.type = 'checkbox';
-      input.checked = settings[field.key];
-      row.append(input, ` ${field.label}`);
-    }
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = settings[field.key];
+    row.append(input, ` ${field.label}`);
     input.disabled = !editable;
-    input.addEventListener('change', () => {
-      onChange({ ...settings, [field.key]: field.options ? input.value : input.checked });
-    });
+    input.addEventListener('change', () => onChange({ ...settings, [field.key]: input.checked }));
     container.appendChild(row);
   }
   // The settings are redrawn on every update, so remember whether the details were open.
@@ -199,6 +286,30 @@ function renderSettings(container, settings, editable, onChange) {
   container.appendChild(details);
 }
 const detailsOpen = {};
+
+// "Detailed rules" right after the Baiman contest option: opens its rules under the format row.
+// It works whatever the format, and for players who can't change the settings.
+function contestRulesToggle(container) {
+  const key = `${container.id}-contest`;
+  const toggle = document.createElement('span');
+  toggle.className = 'rules-toggle';
+  toggle.setAttribute('role', 'button');
+  toggle.tabIndex = 0;
+  toggle.textContent = `${detailsOpen[key] ? '▾' : '▸'} Detailed rules`;
+  const flip = () => {
+    detailsOpen[key] = !detailsOpen[key];
+    if (container.id === 'create-settings') drawCreateSettings();
+    else render();
+  };
+  toggle.addEventListener('click', flip);
+  toggle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      flip();
+    }
+  });
+  return toggle;
+}
 
 let createSettings = { ...DEFAULT_SETTINGS };
 const drawCreateSettings = () => renderSettings($('create-settings'), createSettings, true, (s) => {
@@ -265,7 +376,7 @@ function unseenCounts(game, you) {
     }
   }
   const counts = Array(34).fill(4);
-  for (const t of seen.values()) counts[tileIndex(t)]--;
+  for (const t of seen.values()) if (!isWild(t)) counts[tileIndex(t)]--; // the wild tile isn't one of the 136
   return counts;
 }
 
@@ -277,11 +388,14 @@ function fillWaits(container, waits, furiten) {
     const item = document.createElement('span');
     item.className = 'wait';
     item.appendChild(tileEl(tileOfKind(w.kind)));
-    const left = document.createElement('span');
-    left.className = 'wait-left';
-    left.textContent = `×${unseen[w.kind]}`;
-    left.title = `${unseen[w.kind]} not visible to you`;
-    item.appendChild(left);
+    // A hand that wins on any tile shows the wild tile alone, with no count.
+    if (!w.any) {
+      const left = document.createElement('span');
+      left.className = 'wait-left';
+      left.textContent = `×${unseen[w.kind]}`;
+      left.title = `${unseen[w.kind]} not visible to you`;
+      item.appendChild(left);
+    }
     if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
     container.appendChild(item);
   }
@@ -313,6 +427,7 @@ const hidePreview = () => (previewBox.hidden = true);
 // Outlines every other visible tile of the same kind as the hovered one: in hands, melds,
 // ponds, the dora panel and the waits line. Face-down tiles have no kind and never match.
 function highlightKind(el) {
+  if (view?.game?.noHints) return;
   for (const other of document.querySelectorAll(`.tile[data-kind="${el.dataset.kind}"]`)) {
     if (other !== el) other.classList.add('same-kind');
   }
@@ -329,6 +444,7 @@ let algebraic = localStorage.getItem('riichiAlgebraic') === '1';
 const HONOR_IMAGES = ['ton', 'nan', 'xia', 'pei', 'haku', 'hatsu', 'chun'];
 const SUIT_IMAGES = { m: 'man', p: 'pin', s: 'sou' };
 function tileImage(tile) {
+  if (isWild(tile)) return 'tiles/tileset2/1a.svg'; // the Baiman contest's wild tile, 1A
   const name = tile.suit === 'z' ? HONOR_IMAGES[tile.rank - 1] : `${tile.red ? 'aka' : ''}${tile.rank}${SUIT_IMAGES[tile.suit]}`;
   return `tiles/tileset2/${name}.svg`;
 }
@@ -361,7 +477,12 @@ function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {
   if (clickable) {
     el.classList.add('clickable');
     el.addEventListener('click', () => {
-      if (choosingRiichi) {
+      if (view?.game?.phase === 'exchange') {
+        // Select or deselect a tile to pass (at most three).
+        if (exchangePicks.has(tile.id)) exchangePicks.delete(tile.id);
+        else if (exchangePicks.size < 3) exchangePicks.add(tile.id);
+        render();
+      } else if (choosingRiichi) {
         choosingRiichi = false;
         send({ type: 'riichi', tileId: tile.id });
       } else {
@@ -374,7 +495,9 @@ function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {
 
 // Whether your own tile can be clicked right now.
 function canClickTile(tile, player, game, you) {
-  if (player.seat !== you || game.current !== you || game.phase !== 'discard') return false;
+  if (player.seat !== you || isWild(tile)) return false; // the wild tile is never discarded or passed
+  if (game.phase === 'exchange') return !game.exchange.mine; // until you have passed your three
+  if (game.current !== you || game.phase !== 'discard') return false;
   if (choosingRiichi) return game.riichiDiscards.includes(tile.id);
   // After riichi, only a winning draw can be clicked (to decline the tsumo); other draws
   // are discarded automatically.
@@ -384,6 +507,7 @@ function canClickTile(tile, player, game, you) {
 
 // A tile object for a tile kind (0-33), for showing a kind with the normal tile element.
 function tileOfKind(kind) {
+  if (kind === 34) return { id: -1, suit: 'A', rank: 1, red: false }; // the wild tile: "wins on anything"
   return { id: -1, suit: 'mpsz'[Math.floor(kind / 9)], rank: (kind % 9) + 1, red: false };
 }
 
@@ -419,11 +543,17 @@ function renderSeat(el, player, game, you) {
   const wind = seatWind(player.seat, game.dealer);
   name.innerHTML = (player.seat === game.dealer ? `<span class="dealer">${wind}</span>` : wind) +
     ` · ${who}${offline} · <span class="score">${game.scores[player.seat].toLocaleString()}</span>`;
-  const delta = result?.deltas?.[player.seat];
+  // The hand's score change, after a standard hand only: Baiman contest points already count
+  // in the score as each win happens.
+  const delta = result?.type === 'contest' ? 0 : result?.deltas?.[player.seat];
   if (delta) name.innerHTML += ` <span class="delta ${delta > 0 ? 'gain' : 'loss'}">(${delta > 0 ? '+' : ''}${delta.toLocaleString()})</span>`;
   if (result?.type === 'exhaustiveDraw') {
     name.innerHTML += ` · ${result.tenpai.includes(player.seat) ? 'Tenpai' : 'Noten'}`;
-    if (result.nagashi.includes(player.seat)) name.innerHTML += ' · <span class="riichi-tag">Nagashi mangan</span>';
+    if (result.nagashi.includes(player.seat)) name.innerHTML += ' · <span class="riichi-tag">Nagashi</span>';
+  }
+  if (game.phase === 'exchange' && game.exchange.picked[player.seat]) name.innerHTML += ' · tiles chosen';
+  if (result?.type === 'contest' && result.nagashi.some((n) => n.seat === player.seat)) {
+    name.innerHTML += ' · <span class="riichi-tag">Nagashi</span>';
   }
   if (player.riichi) {
     name.innerHTML += ` <span class="riichi-tag">${player.riichi.double ? 'Double riichi' : 'Riichi'}` +
@@ -442,14 +572,20 @@ function renderSeat(el, player, game, you) {
   const clickable = (t) => canClickTile(t, player, game, you);
   // Your tiles you could discard into tenpai show the waits that would leave on hover.
   const preview = (t) => (player.seat === you && clickable(t) ? game.discardPreview?.[t.id] ?? null : null);
-  const dim = (t) => (choosingRiichi && player.seat === you && !clickable(t) ? ' dimmed' : '');
+  const hints = !game.noHints;
+  // Tiles you can't riichi with are dimmed while you choose; so are the tiles you are passing.
+  const passing = (t) => game.phase === 'exchange' && player.seat === you && (exchangePicks.has(t.id) || game.exchange.mine?.includes(t.id));
+  const dim = (t) => (passing(t) || (hints && choosingRiichi && player.seat === you && !clickable(t)) ? ' dimmed' : '');
   if (player.hand) {
     player.hand.forEach((t) => hand.appendChild(tileEl(t, { clickable: clickable(t), extraClass: dim(t).trim(), preview: preview(t) })));
+    // A Baiman contest winner's tsumo tile stays with them until the hand ends.
+    const ronTile = result?.type === 'ron' ? result.tile
+      : result?.type === 'contest' ? result.wins.find((w) => w.seat === player.seat && w.type === 'ron')?.tile : null;
     if (player.drawn) {
-      const extra = (won ? 'drawn win-tile' : 'drawn last-drawn') + dim(player.drawn);
+      const extra = (won || player.won ? 'drawn win-tile' : hints ? 'drawn last-drawn' : 'drawn') + dim(player.drawn);
       hand.appendChild(tileEl(player.drawn, { clickable: clickable(player.drawn), extraClass: extra, preview: preview(player.drawn) }));
-    } else if (won && result.type === 'ron') {
-      hand.appendChild(tileEl(result.tile, { extraClass: 'drawn win-tile' }));
+    } else if (won && ronTile) {
+      hand.appendChild(tileEl(ronTile, { extraClass: 'drawn win-tile' }));
     }
   } else {
     for (let i = 0; i < player.handCount; i++) hand.appendChild(tileEl(null));
@@ -487,7 +623,7 @@ function renderSeat(el, player, game, you) {
 
   // Between your turns, show your own waits (not mid-turn, e.g. right after a chii).
   const myDiscard = game.current === you && game.phase === 'discard';
-  if (player.seat === you && player.hand && !player.drawn && !won && !myDiscard) {
+  if (hints && player.seat === you && player.hand && !player.drawn && !won && !player.won && !myDiscard) {
     // Each wait is shown as a tile, noting if winning on it has no yaku or only by tsumo
     // (atozuke: a hand may have a yaku on only some of its waits). Furiten belongs to the
     // whole hand, so a single "(furiten)" comes after all the waits.
@@ -503,7 +639,8 @@ function renderSeat(el, player, game, you) {
   pond.className = 'pond';
   // The discard you can call is outlined (only players who can call it are sent it), and so is
   // the tile a hand was won on by ron.
-  const target = game.lastDiscard?.tile ?? (result?.type === 'ron' ? result.tile : null);
+  // With no hints, only the ron tile is outlined, once the hand is over.
+  const target = (game.noHints ? null : game.lastDiscard?.tile) ?? (result?.type === 'ron' ? result.tile : null);
   // The riichi declaration tile lies sideways; tsumogiri discards are a shade darker, and
   // discards another player called are darker still.
   player.discards.forEach((t, i) => {
@@ -518,8 +655,35 @@ function renderSeat(el, player, game, you) {
 }
 
 // One line per winner: the yaku and dora with their han, then han/fu and the payment.
+// A score's yaku and dora, e.g. "Riichi 1 · Tanyao 1 · Dora 2"; yakuman with their multiple.
+function yakuParts(s) {
+  if (s.yakuman) return s.yaku.map((y) => `${y.name}${y.yakuman > 1 ? ` (${y.yakuman}x)` : ''}`);
+  const parts = s.yaku.map((y) => `${y.name} ${y.han}`);
+  if (s.dora.dora) parts.push(`Dora ${s.dora.dora}`);
+  if (s.dora.aka) parts.push(`Red five ${s.dora.aka}`);
+  if (s.dora.ura) parts.push(`Ura dora ${s.dora.ura}`);
+  return parts;
+}
+
+// Baiman contest: each win in order, with its han and limit but no fu (points don't need it).
+function contestBreakdownHtml(game, you) {
+  const { result } = game;
+  return result.wins.map((w, i) => {
+    const s = result.scores[i];
+    const who = w.seat === you ? 'You' : playerName(w.seat, game);
+    const how = w.type === 'tsumo' ? 'tsumo' : `ron from ${w.from === you ? 'you' : playerName(w.from, game)}${w.chankan ? ', robbing a kan' : ''}`;
+    const value = s.yakuman ? s.limit : `${s.han} han${s.limit ? ` · ${s.limit}` : ''}`;
+    return `<div class="breakdown"><b>${who}</b> (${how}): ${yakuParts(s).join(' · ')}<br>` +
+      `${value}: ${w.points} point${w.points === 1 ? '' : 's'}</div>`;
+  }).join('') + result.nagashi.map((n) => {
+    const who = n.seat === you ? 'You' : playerName(n.seat, game);
+    return `<div class="breakdown"><b>${who}</b>: Nagashi (${n.limit}): ${n.points} point${n.points === 1 ? '' : 's'}</div>`;
+  }).join('');
+}
+
 function breakdownHtml(game, you) {
   const { result } = game;
+  if (result?.type === 'contest') return contestBreakdownHtml(game, you); // wins, and nagashi at the wall
   if (!result?.scores) return '';
   return result.winners.map((seat, i) => {
     const s = result.scores[i];
@@ -544,6 +708,27 @@ function breakdownHtml(game, you) {
   }).join('');
 }
 
+// Baiman contest, after the tile exchange: who passed to whom, by seat wind in turn order,
+// e.g. "Tile passes: E -> S, S -> W, W -> N, N -> E". It stays for the rest of the hand.
+function passesHtml(game) {
+  if (!game.contest || !game.passes) return '';
+  const parts = [0, 1, 2, 3].map((w) => {
+    const seat = (game.dealer + w) % 4;
+    return `${seatWind(seat, game.dealer)} -&gt; ${seatWind(game.passes[seat], game.dealer)}`;
+  });
+  return `<div class="passes"><i>Tile passes: ${parts.join(', ')}</i></div>`;
+}
+
+// Baiman contest: each win so far this hand with its value, under the format in the info panel.
+function contestWinsHtml(game, you) {
+  return (game.contestWins ?? []).map((w) => {
+    const who = w.seat === you ? 'You' : playerName(w.seat, game);
+    const value = w.yakuman ? (w.yakuman > 1 ? `${w.yakuman}x yakuman` : 'Yakuman')
+      : `${w.han} han${w.limit === 'Kazoe yakuman' ? ' (kazoe yakuman)' : ''}`;
+    return `<div class="contest-win">${who}: ${value}</div>`;
+  }).join('');
+}
+
 function statusText(game, you) {
   const { result } = game;
   if (result?.type === 'abortiveDraw') {
@@ -554,7 +739,7 @@ function statusText(game, you) {
   }
   if (result?.type === 'exhaustiveDraw' && result.nagashi.length > 0) {
     const names = result.nagashi.map((s) => (s === you ? 'You' : playerName(s, game)));
-    return `Exhaustive draw: nagashi mangan for ${names.join(' and ')}`;
+    return `Exhaustive draw: nagashi for ${names.join(' and ')}`;
   }
   if (result?.type === 'exhaustiveDraw') {
     const { tenpai } = result;
@@ -562,6 +747,13 @@ function statusText(game, you) {
     if (tenpai.length === 4) return 'Exhaustive draw: everyone is tenpai';
     const names = tenpai.map((s) => (s === you ? 'You' : playerName(s, game)));
     return `Exhaustive draw: ${names.join(', ')} ${tenpai.length === 1 && tenpai[0] !== you ? 'is' : 'are'} tenpai`;
+  }
+  if (result?.type === 'contest') {
+    const names = (seats) => seats.map((s) => (s === you ? 'You' : playerName(s, game))).join(', ');
+    const nagashi = result.nagashi.length ? `; nagashi for ${names(result.nagashi.map((n) => n.seat))}` : '';
+    if (result.reason === 'yakuman') return `A yakuman ends the match: ${names(result.winners)} won`;
+    if (!result.winners.length) return `Wall exhausted: nobody won${nagashi}`;
+    return `${result.reason === 'three winners' ? 'Three players won' : 'Wall exhausted'}: ${names(result.winners)}${nagashi}`;
   }
   if (result?.type === 'tsumo') {
     const [winner] = result.winners;
@@ -575,6 +767,12 @@ function statusText(game, you) {
   }
   // Whose turn it is shows as a bold name line, not here. The pause before a draw (which is
   // also how others deciding on a call look) has no status text.
+  if (game.phase === 'exchange') {
+    const waiting = game.exchange.picked.filter((p) => !p).length;
+    if (you === null || game.exchange.mine) return `Tile exchange: waiting for ${waiting} more player${waiting === 1 ? '' : 's'} to choose`;
+    return 'Tile exchange: choose 3 tiles to pass (not the wild tile); they go to a random other player';
+  }
+  if (game.contest && game.players[you]?.won) return 'You have won: waiting for the hand to end';
   if (game.phase === 'draw' || game.phase === 'held') return ''; // held: the pause before a win's result
   if (game.phase === 'rinshan') return game.current === you ? 'Kan: drawing a replacement tile…' : '';
   if (game.phase === 'claim') {
@@ -600,6 +798,7 @@ function finalHtml(match, you) {
   const reasons = {
     'last hand': 'The last hand is over.', 'target reached': 'Someone reached 30,000 in sudden death.',
     'extension over': 'Sudden death ran out.', bust: 'Someone went below 0.', 'agari-yame': 'The dealer ended it in first place.',
+    yakuman: 'A yakuman ended the match.',
   };
   return `<div class="final"><div class="status">Match over</div><div>${reasons[match.final.reason] ?? ''}</div>` +
     `<table><tr><th>Place</th><th>Player</th><th>Score</th></tr>${rows}</table></div>`;
@@ -614,7 +813,8 @@ function renderDora(game) {
     for (let i = 0; i < INDICATOR_SLOTS; i++) row.appendChild(tileEl(tiles[i] ?? null));
   };
   fill($('dora-row'), game.doraIndicators);
-  fill($('ura-row'), game.result?.uraIndicators ?? []);
+  // Baiman contest: a player who has won in riichi sees the ura dora during the hand too.
+  fill($('ura-row'), game.result?.uraIndicators ?? game.uraIndicators ?? []);
 }
 
 function render() {
@@ -642,8 +842,9 @@ function render() {
     ${(() => { const status = statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
     ${breakdownHtml(game, you)}
     <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
+    ${passesHtml(game)}
     <div>Wall: ${game.wallCount} tiles left</div>
-    <div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>
+    ${game.contest ? `<div>Baiman contest</div>${contestWinsHtml(game, you)}` : `<div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>`}
     ${game.result?.honbaBonus ? `<div>Honba: +${game.result.honbaBonus.toLocaleString()}</div>` : ''}
     ${you === null ? '<div>Watching</div>' : ''}
     ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
@@ -661,6 +862,10 @@ function render() {
   kyuushuBtn.hidden = !game.canKyuushu;
   ronBtn.hidden = !game.canRon;
   passBtn.hidden = !game.canRon && !game.ponOptions.length && !game.openKanOptions.length && !game.chiiOptions.length;
+  if (game.phase !== 'exchange' || game.exchange.mine) exchangePicks = new Set();
+  exchangeBtn.hidden = !(game.phase === 'exchange' && you !== null && !game.exchange.mine);
+  exchangeBtn.disabled = exchangePicks.size !== 3;
+  exchangeBtn.textContent = `Pass 3 tiles (${exchangePicks.size}/3)`;
 
   // One Pon or Chii button per distinct pair of tiles you could reveal.
   callOptionsEl.innerHTML = '';
@@ -706,6 +911,10 @@ for (const box of autoBoxes) {
     send({ type: 'auto', settings: Object.fromEntries(autoBoxes.map((b) => [b.dataset.auto, b.checked])) });
   });
 }
+
+exchangeBtn.addEventListener('click', () => {
+  if (exchangePicks.size === 3) send({ type: 'exchange', tiles: [...exchangePicks] });
+});
 
 nextHandBtn.addEventListener('click', () => send({ type: 'nextHand' }));
 rematchBtn.addEventListener('click', () => send({ type: 'rematch' }));

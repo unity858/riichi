@@ -154,7 +154,7 @@ for (const riichi of [false, true]) {
     passClaims(s);
     draw(s);
   }
-  check('seeds/nagashi.txt: exhaustive draw with nagashi mangan for East, 4000 all, East revealed',
+  check('seeds/nagashi.txt: exhaustive draw with nagashi for East, 4000 all, East revealed',
     s.result?.type === 'exhaustiveDraw' && s.result.nagashi.join() === '0' &&
     s.result.deltas.join() === '12000,-4000,-4000,-4000' && s.result.revealed.join() === '0');
 }
@@ -175,6 +175,26 @@ for (const riichi of [false, true]) {
   const sc = tsumo(s, 0) ? s.result.scores[0] : null;
   check('seeds/sanankou-tsumo.txt: no ron on the 5m, then tsumo on the 7m for sanankou, 2600 all',
     !ronOffered && yakuNames(sc) === 'Menzen tsumo, Sanankou' && sc.payment.all === 2600);
+}
+
+{
+  // seeds/all-tenpai.txt, in a standard game (a Baiman contest deals the wild tile in place of
+  // positions 48-51, so the seed waits to be rebuilt for the wild tile's rules): East, South and
+  // West double riichi on a lone honor, North discards its honor, then East tsumos a baiman.
+  const s = newHand({ wall: wallFromSeed(fs.readFileSync('seeds/all-tenpai.txt', 'utf8')) });
+  let calls = 0;
+  for (let i = 0; i < 4; i++) {
+    if (i > 0) draw(s);
+    if (s.current === 3) discard(s, s.players[3].drawn.id); // a fourth riichi would abort the hand
+    else declareRiichi(s, s.current, s.players[s.current].drawn.id);
+    if (s.phase === 'claim') calls++;
+  }
+  check('seeds/all-tenpai.txt: East, South and West declare a double riichi, and nobody can call the honors',
+    [0, 1, 2].every((seat) => s.players[seat].riichi?.double) && calls === 0);
+  draw(s);
+  tsumo(s, 0);
+  check('then East tsumos: 8 han, baiman, 8,000 all (and the three riichi sticks)', s.result?.type === 'tsumo' && s.result.scores[0].han === 8 &&
+    s.result.deltas.join() === '27000,-8000,-8000,-8000');
 }
 
 done();

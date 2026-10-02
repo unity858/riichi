@@ -16,6 +16,8 @@
 //              126, 127 the dora indicator and the ura dora indicator
 //              128/129, 130/131, 132/133, 134/135  the indicator (and ura) each kan reveals
 //            Each kan also moves the last live-wall tile (121, then 120, ...) to the dead wall.
+// In a Baiman contest everyone's 13th tile is the wild tile (1A), which isn't in the wall, so
+// 48-51 aren't dealt: 48 is the dealer's first draw and 49-121 the remaining draws.
 
 import { createTiles, shuffle } from './game.js';
 

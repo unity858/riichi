@@ -1,0 +1,44 @@
+# All four players start tenpai, each able to declare a double riichi; made for testing the
+# Baiman contest quickly (three winners in the second go-around).
+# NOTE: Baiman contest hands now deal everyone the wild tile (1A) in place of positions 48-51,
+#   so in a contest nobody starts tenpai until this seed is rebuilt for the wild tile's rules.
+#   In a standard game it works as described below.
+#   Everyone draws a lone honor first (East Chun, South Hatsu, West Haku, North N). In each tab
+#     in turn: press Riichi, then click the honor you just drew. Nobody can ron or call them.
+#   Then East, South and West draw their winning tiles in turn: press Tsumo each time (or tick
+#     "Ron and tsumo when possible" in the Auto checklist).
+#   Expect in a Baiman contest (all with ippatsu and menzen tsumo):
+#     East:  Double riichi 2, Ippatsu 1, Menzen tsumo 1, Pinfu 1, Tanyao 1, Dora 1, Red five 1
+#            = 8 han, baiman: 1 point
+#     South: Double riichi 2, Ippatsu 1, Menzen tsumo 1, Pinfu 1, Ura dora 2 = 7 han, haneman:
+#            0 points (the ura dora are 9s, South's pair; only South and the other riichi
+#            winners see them during the hand)
+#     West:  Double riichi 2, Ippatsu 1, Menzen tsumo 1, Ittsu 2, Chinitsu 6 = 12 han,
+#            sanbaiman: 1 point
+#     West is the third winner, so the hand ends: scores 1, 0, 1, 0. North is left tenpai.
+#   In a standard game, four riichi abort the hand (suucha riichi): have North just discard
+#     the N instead, and East's tsumo ends the hand as a baiman, 8,000 all.
+# Run: DEBUG_SEED=seeds/all-tenpai.txt npm start
+#
+# Hands: East  234m067m456p66s78s (waits 6s/9s), South 123m789m345s99s45m (waits 3m/6m),
+#        West  123p456p789p11p22p (waits 1p/2p), North 678m234s678s33z45p (waits 3p/6p)
+
+# deal round 1: East, South, West, North (positions 0-15)
+2340m  1237m  1234p  678m2s
+# deal round 2: East, South, West, North (positions 16-31)
+67m45p  89m34s  5678p  3467s
+# deal round 3: East, South, West, North (positions 32-47)
+6p667s  599s4m  9112p  8s33z4p
+# one more each: East, South, West, North (48-51)
+8s5m25p
+# first draws, East first (52-55): the double riichi discards
+7654z
+# second draws (56-59): East's 6s, South's 3m and West's 2p win; North's 1s doesn't
+6s3m2p1s
+# rest of the live wall (60-121)
+11122344566788999m13334066777888p
+999p111222334405577899s1111222233z
+# dead wall (122-135): 126 = dora indicator 5m (dora 6m), 127 = ura indicator 8s (ura dora 9s)
+4445z
+5m8s
+55666777z

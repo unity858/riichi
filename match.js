@@ -7,35 +7,50 @@ export const WIND_NAMES = ['East', 'South', 'West', 'North'];
 
 // Room settings for a new match. Every rule here is an option; defaults follow Mahjong Soul.
 export const DEFAULT_SETTINGS = {
+  format: 'standard', // 'standard', or 'baiman': the Baiman contest (see game.js)
   length: 'south', // 'east': East 1-4 only (tonpuusen); 'south': East 1 to South 4 (hanchan)
   bust: true, // the match ends as soon as someone is below 0 points
   extension: true, // if nobody has TARGET_SCORE after the last hand, play on into the next wind (sudden death)
   agariYame: true, // in the last hand, a dealer who repeats while in first place ends the match
-  yakuRebalance: false, // house yaku values: see scoring.js (and nagashi mangan in game.js)
+  yakuRebalance: false, // house yaku values: see scoring.js (and nagashi in game.js)
+  noHints: false, // no waits, discard previews, furiten, tsumogiri shading or ippatsu shown (see server.js)
+  // Baiman contest only: 'baiman', the dealer repeats only after winning a baiman or sanbaiman
+  // (a win worth a point); 'none', the deal always passes.
+  contestRepeat: 'baiman',
 };
 export const TARGET_SCORE = 30000;
 const LENGTHS = { east: 1, south: 2 }; // number of round winds in the regular match
+const FORMATS = ['standard', 'baiman'];
+const CONTEST_REPEATS = ['baiman', 'none'];
+// The Baiman contest starts everyone on 0 and nobody loses points, so going bust and playing
+// on to reach TARGET_SCORE don't apply; those settings are always off for it.
+const CONTEST_OFF = ['bust', 'extension'];
 
 // Accepts settings from a client, keeping only known keys with valid values.
 export function normalizeSettings(input = {}) {
   const s = { ...DEFAULT_SETTINGS };
   if (input && typeof input === 'object') {
     if (input.length in LENGTHS) s.length = input.length;
-    for (const key of ['bust', 'extension', 'agariYame', 'yakuRebalance']) if (typeof input[key] === 'boolean') s[key] = input[key];
+    if (FORMATS.includes(input.format)) s.format = input.format;
+    if (CONTEST_REPEATS.includes(input.contestRepeat)) s.contestRepeat = input.contestRepeat;
+    for (const key of ['bust', 'extension', 'agariYame', 'yakuRebalance', 'noHints']) if (typeof input[key] === 'boolean') s[key] = input[key];
   }
+  if (s.format === 'baiman') for (const key of CONTEST_OFF) s[key] = false;
   return s;
 }
 
 export function newMatch(settings = DEFAULT_SETTINGS) {
+  const normalized = normalizeSettings(settings);
+  const start = normalized.format === 'baiman' ? 0 : STARTING_SCORE;
   return {
-    settings: normalizeSettings(settings),
+    settings: normalized,
     roundWind: 0, // index into WIND_NAMES
     hand: 0, // 0-3: East 1 is roundWind 0, hand 0
     dealer: 0,
     startDealer: 0, // breaks ties in the final ranking
     honba: 0,
     riichiSticks: 0,
-    scores: [0, 1, 2, 3].map(() => STARTING_SCORE),
+    scores: [0, 1, 2, 3].map(() => start),
     over: false,
     final: null, // set when the match ends, see finish()
     history: [], // one entry per finished hand
@@ -50,7 +65,8 @@ export function handLabel(match) {
 // What newHand needs for the next hand.
 export function handSettings(match) {
   const { dealer, roundWind, scores, riichiSticks, honba } = match;
-  return { dealer, roundWind, scores, riichiSticks, honba, rules: { yakuRebalance: match.settings.yakuRebalance } };
+  const rules = { yakuRebalance: match.settings.yakuRebalance, contest: match.settings.format === 'baiman' };
+  return { dealer, roundWind, scores, riichiSticks, honba, rules };
 }
 
 // Seats from first to last place. Equal scores rank by turn order from the starting dealer.
@@ -73,14 +89,22 @@ export function recordHand(match, state) {
   const result = state.result;
   match.scores = [...state.scores];
   match.riichiSticks = state.riichiSticks;
-  // An abortive draw counts as a draw where the dealer repeats.
-  const aborted = result.type === 'abortiveDraw';
-  const draw = result.type === 'exhaustiveDraw' || aborted;
-  const dealerRepeats = aborted || (draw ? result.tenpai.includes(match.dealer) : result.winners.includes(match.dealer));
-  match.history.push({ label: handLabel(match), honba: match.honba, type: result.type, winners: result.winners ?? [], deltas: result.deltas });
-  match.honba = dealerRepeats || draw ? match.honba + 1 : 0;
-
   const { settings } = match;
+  let dealerRepeats;
+  match.history.push({ label: handLabel(match), honba: match.honba, type: result.type, winners: result.winners ?? [], deltas: result.deltas });
+  if (settings.format === 'baiman') {
+    // Baiman contest: the contestRepeat setting alone decides (draws and kyuushu never repeat),
+    // and honba count the dealer's repeats in a row.
+    dealerRepeats = settings.contestRepeat === 'baiman' && (result.wins ?? []).some((w) => w.seat === match.dealer && w.points > 0);
+    match.honba = dealerRepeats ? match.honba + 1 : 0;
+  } else {
+    // An abortive draw counts as a draw where the dealer repeats.
+    const aborted = result.type === 'abortiveDraw';
+    const draw = result.type === 'exhaustiveDraw' || aborted;
+    dealerRepeats = aborted || (draw ? result.tenpai.includes(match.dealer) : result.winners.includes(match.dealer));
+    match.honba = dealerRepeats || draw ? match.honba + 1 : 0;
+  }
+
   const regularWinds = LENGTHS[settings.length];
   const lastRegular = match.roundWind === regularWinds - 1 && match.hand === 3;
   const inExtension = match.roundWind >= regularWinds;
@@ -88,6 +112,7 @@ export function recordHand(match, state) {
   const dealerTop = ranking(match)[0] === match.dealer;
 
   if (settings.bust && match.scores.some((s) => s < 0)) return finish(match, 'bust');
+  if (result.type === 'contest' && result.yakuman) return finish(match, 'yakuman'); // Baiman contest
 
   if (dealerRepeats) {
     // A repeat keeps the dealer, except in the last hand when agari-yame ends the match: the

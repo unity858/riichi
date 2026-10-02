@@ -41,7 +41,7 @@ const yakuman = (s, name) => s.yaku.find((y) => y.name === name)?.yakuman;
 }
 
 {
-  // Nagashi mangan for the dealer (seat 0), with and without the rebalance.
+  // Nagashi for the dealer (seat 0), with and without the rebalance.
   const nagashi = (rebalance) => {
     const s = table({ drawn: '9s', wall: 0 });
     s.rules.yakuRebalance = rebalance;
@@ -133,7 +133,7 @@ check('renhou is only by ron, not tsumo',
   s.players[0].discards = parse('19m1z9p', 1950);
   s.doraIndicators = parse('8s9s4m', 4000); // dora 9s, 1s, 5m
   discard(s, s.players[0].drawn.id);
-  check('nagashi mangan pays the same with dora: 4000 all', s.result.nagashi.join() === '0' && s.result.deltas.join() === '12000,-4000,-4000,-4000');
+  check('nagashi pays the same with dora: 4000 all', s.result.nagashi.join() === '0' && s.result.deltas.join() === '12000,-4000,-4000,-4000');
 }
 
 done();

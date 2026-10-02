@@ -3,6 +3,15 @@
 import { scoreHand, payments, pointDeltas } from './scoring.js';
 
 export const SUITS = ['m', 'p', 's', 'z'];
+// The wild tile (Baiman contest only), written 1A. It is not one of the 136: every contest hand
+// deals one to each player in place of their 13th tile (see newHand). It can never be discarded
+// or called with, and only counts when winning: a hand wins if the wild tile can stand for some
+// kind (any of the 34, never a red five, even one whose four copies are all elsewhere) that
+// makes it complete. The win is scored as whichever kind gives the most han (see scoreWin). Riichi,
+// pon, chii and kan work as usual with the other tiles.
+export const WILD = 'A';
+export const WILD_KIND = 34; // its tileIndex, after the 34 real kinds (0-33)
+export const isWild = (tile) => tile.suit === WILD;
 export const HONOR_NAMES = ['E', 'S', 'W', 'N', 'Wh', 'G', 'R'];
 export const WINDS = ['E', 'S', 'W', 'N'];
 export const STARTING_SCORE = 25000;
@@ -39,13 +48,15 @@ export function createWall() {
 
 // Single point of tile -> display text. Swap for SVG later.
 export function tileLabel(tile) {
+  if (isWild(tile)) return '1A';
   if (tile.suit === 'z') return HONOR_NAMES[tile.rank - 1];
   return `${tile.red ? 0 : tile.rank}${tile.suit}`;
 }
 
+const SUIT_ORDER = [WILD, ...SUITS]; // a wild tile sorts first, at the left of the hand
 export function compareTiles(a, b) {
-  const sa = SUITS.indexOf(a.suit);
-  const sb = SUITS.indexOf(b.suit);
+  const sa = SUIT_ORDER.indexOf(a.suit);
+  const sb = SUIT_ORDER.indexOf(b.suit);
   if (sa !== sb) return sa - sb;
   if (a.rank !== b.rank) return a.rank - b.rank;
   return a.id - b.id;
@@ -58,14 +69,14 @@ export function sortHand(hand) {
 // scores, riichiSticks (unclaimed 1000-point riichi deposits) and honba (the repeat counter,
 // worth HONBA_POINTS each to the winner) carry over from the previous hand; see match.js.
 // wall replaces the random shuffle with a fixed order of all 136 tiles (see seed.js for how
-// the positions are used).
+// the positions are used; a Baiman contest deals one fewer each, see the wild tile above).
 export function newHand({
   dealer = 0,
   roundWind = 0,
   scores = [0, 1, 2, 3].map(() => STARTING_SCORE),
   riichiSticks = 0,
   honba = 0,
-  rules = {}, // { yakuRebalance } from the room settings
+  rules = {}, // { yakuRebalance, contest } from the room settings
   wall: fixedWall = null,
 } = {}) {
   const wall = fixedWall ? [...fixedWall] : createWall();
@@ -98,14 +109,20 @@ export function newHand({
     // 'riichi' | 'ron' | 'tsumo', or null. It clears when they next discard; a riichi (whose
     // discard is the call) clears at the next draw or call instead.
     callout: null,
+    // Baiman contest: set when the player wins, { seat, type, tile, from, score, points, chankan,
+    // robbed }. They then sit out the rest of the hand, their hand still hidden (see wins).
+    won: null,
   }));
 
   // Deal in real order starting from the dealer: 3 rounds of 4 tiles each, then 1 tile each.
+  // In a Baiman contest that last tile is everyone's wild tile, from outside the wall.
   const order = [0, 1, 2, 3].map((i) => (dealer + i) % 4);
   for (let round = 0; round < 3; round++) {
     for (const seat of order) players[seat].hand.push(...wall.splice(0, 4));
   }
-  for (const seat of order) players[seat].hand.push(wall.shift());
+  for (const seat of order) {
+    players[seat].hand.push(rules.contest ? { id: 136 + seat, suit: WILD, rank: 1, red: false } : wall.shift());
+  }
   for (const p of players) sortHand(p.hand);
 
   const state = {
@@ -121,7 +138,8 @@ export function newHand({
     scores: [...scores],
     riichiSticks,
     honba,
-    rules: { yakuRebalance: !!rules.yakuRebalance },
+    // contest: the Baiman contest format (see "Baiman contest" below).
+    rules: { yakuRebalance: !!rules.yakuRebalance, contest: !!rules.contest },
     pendingRiichi: null, // seat whose riichi discard is waiting to pass before the stick is paid
     turnCount: 0,
     discardLog: [], // every discard in order: { tile, from, turn }, turn = turnCount before it
@@ -138,10 +156,17 @@ export function newHand({
     kanPending: null, // { seat, type, tile, meldIndex } while others may rob a kan (chankan)
     robbed: null, // the tile won by chankan from an added kan (it is in no hand or meld)
     result: null, // set when the hand ends, see endHand()
+    wins: [], // Baiman contest: every win so far this hand, in order (each player's won)
+    // Baiman contest: the tile exchange before the first draw (see chooseExchange), while it lasts.
+    exchange: rules.contest ? { picks: [null, null, null, null] } : null,
+    passes: null, // Baiman contest: sigma once the exchange is made (player n passed to passes[n])
+    pauseTurn: null, // Baiman contest: whose turn to show in the pause after a win
   };
 
-  // Dealer takes their 14th tile, so play starts in their discard phase.
-  draw(state);
+  // Dealer takes their 14th tile, so play starts in their discard phase. A Baiman contest hand
+  // first has its tile exchange.
+  if (rules.contest) state.phase = 'exchange';
+  else draw(state);
   return state;
 }
 
@@ -151,9 +176,11 @@ export function draw(state) {
   if (state.phase === 'rinshan') return drawRinshan(state);
   if (state.phase !== 'draw') return null;
   if (state.wall.length === 0) {
-    endHand(state, exhaustiveDraw(state));
+    if (state.rules.contest) finishContest(state, 'wall');
+    else endHand(state, exhaustiveDraw(state));
     return null;
   }
+  state.pauseTurn = null;
   const tile = state.wall.shift();
   clearRiichiCallouts(state);
   state.players[state.current].drawn = tile;
@@ -175,6 +202,7 @@ export function discard(state, tileId) {
     }
   }
 
+  if (player.hand.some((t) => t.id === tileId && isWild(t))) return null; // never discarded
   let tile;
   const fromDraw = !!player.drawn && player.drawn.id === tileId;
   if (fromDraw) {
@@ -197,7 +225,7 @@ export function discard(state, tileId) {
 
   const turn = state.turnCount;
   state.turnCount++;
-  state.current = (state.current + 1) % 4;
+  state.current = nextActive(state, state.current);
 
   // Anyone who can act on this tile decides before play moves on: ron for anyone it
   // completes (including on the last discard, after the wall is empty), pon for anyone
@@ -206,8 +234,8 @@ export function discard(state, tileId) {
   // already let pass.
   const options = {};
   for (const p of state.players) {
-    if (p.seat === player.seat) continue;
-    const ron = isComplete(toCounts([...p.hand, tile])) && !isFuritenNow(state, p.seat) && hasYaku(state, p.seat, tile, false);
+    if (p.seat === player.seat || p.won) continue;
+    const ron = isCompleteTiles([...p.hand, tile]) && !isFuritenNow(state, p.seat) && hasYaku(state, p.seat, tile, false);
     const pon = ponPairs(state, p, tile);
     const kan = openKanTiles(state, p, tile);
     const chii = p.seat === state.current ? chiiPairs(state, p, tile) : [];
@@ -242,6 +270,11 @@ function clearClaims(state) {
 // (suucha riichi) and true is returned too.
 function settleRiichi(state) {
   if (state.pendingRiichi === null) return false;
+  if (state.rules.contest) {
+    // No points change hands in a Baiman contest: riichi is free, and four riichi don't abort.
+    state.pendingRiichi = null;
+    return true;
+  }
   state.scores[state.pendingRiichi] -= 1000;
   state.riichiSticks++;
   state.pendingRiichi = null;
@@ -258,7 +291,10 @@ function afterDiscard(state) {
   settleRiichi(state);
   if (state.phase === 'ended') return; // suucha riichi
   const kanOwners = state.players.filter((p) => p.melds.some((m) => m.type === 'kan')).length;
-  if (kanCount(state) === 4 && kanOwners > 1) endHand(state, abortiveDraw('suukaikan', []));
+  if (state.rules.contest) {
+    if (state.wall.length === 0) finishContest(state, 'wall');
+    else state.phase = 'draw';
+  } else if (kanCount(state) === 4 && kanOwners > 1) endHand(state, abortiveDraw('suukaikan', []));
   else if (state.wall.length === 0) endHand(state, exhaustiveDraw(state));
   else state.phase = 'draw';
 }
@@ -292,7 +328,7 @@ export function declareKyuushu(state, seat) {
 // Noten players pay NOTEN_PAYMENT in total, split evenly, to the tenpai players, who
 // split it evenly. Nobody pays if everyone or nobody is tenpai. Tenpai here needs no yaku.
 //
-// Nagashi mangan: a player whose discards are all terminals and honors, none of them
+// Nagashi: a player whose discards are all terminals and honors, none of them
 // called, is paid a mangan (a baiman with the yaku rebalance) as if by tsumo. When anyone gets
 // it, it replaces the noten payments.
 function exhaustiveDraw(state) {
@@ -319,7 +355,7 @@ function exhaustiveDraw(state) {
   return { type: 'exhaustiveDraw', tenpai, nagashi, revealed: revealedAtDraw(tenpai, nagashi), deltas };
 }
 
-// After an exhaustive draw, tenpai players and nagashi mangan winners show their hands.
+// After an exhaustive draw, tenpai players and nagashi winners show their hands.
 function revealedAtDraw(tenpai, nagashi) {
   return [...new Set([...tenpai, ...nagashi])].sort((a, b) => a - b);
 }
@@ -328,10 +364,11 @@ function revealedAtDraw(tenpai, nagashi) {
 //           sticks (riichi sticks collected), honbaBonus (points from honba) }
 //      or { type: 'exhaustiveDraw', tenpai: [seat...], nagashi: [seat...], revealed: [seat...], deltas: [points per seat] }
 //      or { type: 'abortiveDraw', reason, revealed: [seat...], deltas } (see abortiveDraw).
-function endHand(state, result) {
+// paid: the deltas are already in the scores (Baiman contest points count as each win happens).
+function endHand(state, result, { paid = false } = {}) {
   state.result = result;
   state.phase = 'ended';
-  result.deltas?.forEach((d, seat) => (state.scores[seat] += d));
+  if (!paid) result.deltas?.forEach((d, seat) => (state.scores[seat] += d));
 }
 
 // --- Winning ---
@@ -349,6 +386,12 @@ function hasYaku(state, seat, tile, tsumo, opts) {
 export function waitYaku(state, seat) {
   const { hand } = state.players[seat];
   if (hand.length % 3 !== 1) return [];
+  // With a wild tile, yaku aren't checked per wait yet, and a hand that wins on anything shows
+  // the wild tile as its one wait (see waitsOnAnything).
+  if (hand.some(isWild)) {
+    if (waitsOnAnything(hand)) return [{ kind: WILD_KIND, ron: true, tsumo: true, any: true }];
+    return getWaits(hand).map((kind) => ({ kind, ron: true, tsumo: true }));
+  }
   const tileOf = (k) => ({ id: -1, suit: SUITS[Math.floor(k / 9)], rank: (k % 9) + 1, red: false });
   return getWaits(hand).map((kind) => ({
     kind,
@@ -372,6 +415,7 @@ export function discardPreview(state, seat) {
   const preview = {};
   try {
     for (const tile of tiles) {
+      if (isWild(tile)) continue; // it can't be discarded
       const kind = tileIndex(tile);
       if (!byKind.has(kind)) {
         player.hand = tiles.filter((t) => t !== tile);
@@ -420,11 +464,36 @@ function scoreWin(state, seat, tile, tsumo, { chankan = false } = {}) {
     tenhou: firstDraw && seat === state.dealer,
     chiihou: firstDraw && seat !== state.dealer,
   };
+  // A wild tile is always scored as whichever kind (never a red five) gives the most han
+  // (yakuman above any han), then the higher payment. It counts as that tile for dora too, so
+  // an extra dora can push a hand past what its player wanted; that is part of the game.
+  const { hand, melds } = state.players[seat];
+  const wild = hand.find(isWild);
+  let best = null;
+  if (wild) {
+    for (let k = 0; k < 34; k++) {
+      const as = { id: wild.id, suit: SUITS[Math.floor(k / 9)], rank: (k % 9) + 1, red: false };
+      const replaced = hand.map((t) => (t === wild ? as : t));
+      if (!isComplete(toCounts([...replaced, tile]))) continue;
+      const score = scoreHand(replaced, tile, melds, ctx);
+      if (score && (!best || moreHan(score, best))) best = score;
+    }
+  } else {
+    best = scoreHand(hand, tile, melds, ctx);
+  }
   // The game only lets complete hands win, so the fallback is just a safeguard.
-  return scoreHand(state.players[seat].hand, tile, state.players[seat].melds, ctx) ?? {
+  return best ?? {
     yaku: [], dora: { dora: 0, aka: 0, ura: 0 }, han: 0, fu: 0, basic: 0, limit: null,
     payment: payments(0, ctx), total: 0,
   };
+}
+
+// For the wild tile's value: more yakuman, else more han, else a higher payment.
+function moreHan(a, b) {
+  const order = (x) => [x.yakuman || 0, x.han, x.total];
+  const [ka, kb] = [order(a), order(b)];
+  const i = ka.findIndex((v, j) => v !== kb[j]);
+  return i !== -1 && ka[i] > kb[i];
 }
 
 function sumDeltas(list) {
@@ -457,7 +526,7 @@ function payHonba(state, winner, from, deltas) {
 export function canTsumo(state, seat) {
   const player = state.players[seat];
   return state.phase === 'discard' && state.current === seat && !!player.drawn &&
-    isComplete(toCounts([...player.hand, player.drawn])) && hasYaku(state, seat, player.drawn, true);
+    isCompleteTiles([...player.hand, player.drawn]) && hasYaku(state, seat, player.drawn, true);
 }
 
 export function tsumo(state, seat) {
@@ -466,6 +535,12 @@ export function tsumo(state, seat) {
   revealPendingKanDora(state);
   const tile = state.players[seat].drawn;
   const score = scoreWin(state, seat, tile, true);
+  if (state.rules.contest) {
+    // The winning tile stays with the winner, hidden like the rest of their hand.
+    recordWin(state, { seat, type: 'tsumo', tile, from: null, score });
+    continueAfterWin(state, seat);
+    return true;
+  }
   const deltas = pointDeltas(score, { winner: seat, dealer: state.dealer, from: null, tsumo: true });
   const sticks = collectSticks(state, seat, deltas);
   const honbaBonus = payHonba(state, seat, null, deltas);
@@ -559,7 +634,9 @@ export function claim(state, seat, action, tiles = null) {
     .map(Number)
     .filter((s) => state.claims[s] === 'ron')
     .sort((a, b) => ((a - from + 4) % 4) - ((b - from + 4) % 4)); // turn order after the discarder
-  if (winners.length > 0) {
+  if (winners.length > 0 && state.rules.contest) {
+    contestRon(state, winners, tile, from, !!chankan);
+  } else if (winners.length > 0) {
     // A riichi declared on the ronned tile never stands: no stick is paid.
     if (state.pendingRiichi === from) {
       state.players[from].riichi = null;
@@ -637,6 +714,145 @@ function interruptFirstGoAround(state) {
 export function calledTilePosition(meld, seat) {
   const size = (meld.tiles?.length ?? 3) - (meld.addedId ? 1 : 0); // an added kan shows as a pon plus one
   return { 3: 0, 2: 1, 1: size - 1 }[(meld.from - seat + 4) % 4];
+}
+
+// --- Baiman contest ---
+// Everyone starts on 0, and a win scores 1 point if it is worth a baiman or sanbaiman (and 0
+// otherwise), counted as soon as it is won. Nobody loses points: not the discarder, not the
+// others on a tsumo, and riichi is free. A win doesn't end the hand: the winner sits out (their hand stays hidden; its han are
+// public, and a riichi winner alone sees the ura dora) and the others play on, skipping them,
+// until three players have won or the wall runs out. A ron interrupts like a call: it ends
+// ippatsu, double riichi, chiihou, renhou and kyuushu, and the discarder's nagashi. A yakuman
+// (kazoe or not) ends the hand at once, and the match with it (see match.js). There is no noten
+// payment and no abortive draw but kyuushu; nagashi scores like a win (1 point only as a
+// baiman, with the yaku rebalance).
+
+export const CONTEST_LIMITS = ['Baiman', 'Sanbaiman'];
+
+// The next seat after `seat` still playing (not yet won).
+function nextActive(state, seat) {
+  for (let i = 1; i <= 4; i++) {
+    const next = (seat + i) % 4;
+    if (!state.players[next].won) return next;
+  }
+  return seat;
+}
+
+export const isYakuman = (score) => score.yakuman > 0 || score.limit === 'Kazoe yakuman';
+
+function recordWin(state, { seat, type, tile, from, score, chankan = false, robbed = false }) {
+  const win = { seat, type, tile, from, score, points: CONTEST_LIMITS.includes(score.limit) ? 1 : 0, chankan, robbed };
+  state.players[seat].won = win;
+  state.players[seat].callout = type;
+  state.wins.push(win);
+  state.scores[seat] += win.points; // counted at once
+}
+
+// Everyone who called ron on the tile wins. A discard stays in the pond, marked as called; a
+// robbed added kan doesn't happen, and its tile goes to the winners. A closed kan can only be
+// robbed by kokushi, a yakuman, which ends the hand anyway; its tile stays in the kan.
+function contestRon(state, winners, tile, from, chankan) {
+  const scores = winners.map((w) => scoreWin(state, w, tile, false, { chankan }));
+  const robbed = chankan && state.kanPending.type === 'kakan'; // the tile is in no hand or meld
+  if (chankan) {
+    state.kanPending = null;
+  } else {
+    const discarder = state.players[from];
+    discarder.called[discarder.discards.length - 1] = true;
+  }
+  clearClaims(state);
+  interruptFirstGoAround(state); // like a call
+  settleRiichi(state);
+  winners.forEach((w, i) => recordWin(state, { seat: w, type: 'ron', tile, from, score: scores[i], chankan, robbed: robbed && i === 0 }));
+  continueAfterWin(state, from);
+}
+
+// After a win, play goes on from the next player still in, unless three have won or the
+// wall is empty. `seat` is whose turn it was (the winner on a tsumo, the discarder on a ron).
+function continueAfterWin(state, seat) {
+  if (state.wins.some((w) => isYakuman(w.score))) return finishContest(state, 'yakuman');
+  if (state.wins.length >= 3) return finishContest(state, 'three winners');
+  if (state.wall.length === 0) return finishContest(state, 'wall');
+  state.current = nextActive(state, seat);
+  state.pauseTurn = seat;
+  state.phase = 'draw';
+}
+
+// The hand ends: winners' hands, the points and (for a riichi winner) the ura dora are shown.
+// result: { type: 'contest', reason: 'three winners' | 'yakuman' | 'wall', winners, scores, wins,
+//           nagashi: [{ seat, limit, points }], deltas, yakuman (a yakuman ended it),
+//           tenpai (players still in who are tenpai, for the dealer repeat), uraIndicators? }
+// Nagashi (at the end of the wall, for players who haven't won) is a mangan, or a
+// baiman with the yaku rebalance, scored like a win.
+function finishContest(state, reason) {
+  const winners = state.wins.map((w) => w.seat);
+  const deltas = [0, 0, 0, 0];
+  for (const w of state.wins) deltas[w.seat] += w.points;
+  const tenpai = state.players.filter((p) => !p.won && isTenpai(p.hand)).map((p) => p.seat);
+  const limit = state.rules.yakuRebalance ? 'Baiman' : 'Mangan';
+  const nagashi = reason !== 'wall' ? [] : state.players
+    .filter((p) => !p.won && p.discards.length > 0 && !p.called.some(Boolean) &&
+      p.discards.every((t) => TERMINALS_AND_HONORS.includes(tileIndex(t))))
+    .map((p) => ({ seat: p.seat, limit, points: CONTEST_LIMITS.includes(limit) ? 1 : 0 }));
+  for (const n of nagashi) {
+    deltas[n.seat] += n.points;
+    state.scores[n.seat] += n.points;
+  }
+  // deltas sum up the hand for the result; every point in them is already in the scores.
+  endHand(state, {
+    type: 'contest', reason, winners, scores: state.wins.map((w) => w.score),
+    wins: state.wins.map(({ seat, type, tile, from, points, chankan }) => ({ seat, type, tile, from, points, chankan })),
+    nagashi, deltas, tenpai, yakuman: reason === 'yakuman', ...revealUra(state, winners),
+  }, { paid: true });
+}
+
+// --- Baiman contest: the tile exchange ---
+// Before the first draw each player picks exactly three tiles from their hand, never the wild
+// tile. Once all four have picked, a random derangement sigma of [0, 1, 2, 3] (no player keeps
+// their own) is drawn, and player n's three tiles go to player sigma[n]. Once made, the passes
+// are public for the rest of the hand (state.passes).
+// Then the dealer draws and play starts as usual. It is there to make rare hands (flushes in
+// particular) reachable.
+
+// All 9 permutations of [0, 1, 2, 3] with no fixed point.
+export const DERANGEMENTS = (() => {
+  const all = [];
+  const build = (prefix, rest) => {
+    if (!rest.length) return all.push(prefix);
+    rest.forEach((x, i) => build([...prefix, x], [...rest.slice(0, i), ...rest.slice(i + 1)]));
+  };
+  build([], [0, 1, 2, 3]);
+  return all.filter((p) => p.every((x, i) => x !== i));
+})();
+
+// Uniform over the 9 derangements; rng is any function returning [0, 1).
+export function randomDerangement(rng = Math.random) {
+  return DERANGEMENTS[Math.floor(rng() * DERANGEMENTS.length)];
+}
+
+// Seat picks three tiles (by id) to pass. A pick is final. Returns false if it isn't allowed:
+// not the exchange, already picked, or not exactly three distinct non-wild tiles of their hand.
+// The last pick makes the exchange (sigma can be given, for tests) and the dealer draws next.
+export function chooseExchange(state, seat, ids, sigma = null) {
+  if (state.phase !== 'exchange' || state.exchange.picks[seat] || !Array.isArray(ids)) return false;
+  const hand = state.players[seat].hand;
+  const tiles = ids.map((id) => hand.find((t) => t.id === id));
+  if (tiles.length !== 3 || new Set(ids).size !== 3 || tiles.some((t) => !t || isWild(t))) return false;
+  state.exchange.picks[seat] = [...ids];
+  if (state.exchange.picks.every(Boolean)) makeExchange(state, sigma ?? randomDerangement());
+  return true;
+}
+
+function makeExchange(state, sigma) {
+  const passed = state.exchange.picks.map((ids, n) => {
+    const hand = state.players[n].hand;
+    return ids.map((id) => hand.splice(hand.findIndex((t) => t.id === id), 1)[0]);
+  });
+  passed.forEach((tiles, n) => state.players[sigma[n]].hand.push(...tiles));
+  for (const p of state.players) sortHand(p.hand);
+  state.passes = [...sigma];
+  state.exchange = null;
+  state.phase = 'draw'; // the dealer's first draw
 }
 
 // --- Kan ---
@@ -718,6 +934,13 @@ export function kanOptions(state, seat) {
 // three as a triplet. So 1112444 can't kan the 4s, although the waits stay the same: winning
 // on a 3 reads 111 234 44, using a 4 in a run.
 function riichiKanKeepsHand(hand, k) {
+  // With a wild tile the readings can't be listed the same way, so the kan must simply leave
+  // the waits exactly as they were.
+  if (hand.some(isWild)) {
+    const before = getWaits(hand);
+    const after = getWaits(hand.filter((t) => isWild(t) || tileIndex(t) !== k));
+    return before.length > 0 && before.join() === after.join();
+  }
   const counts = toCounts(hand);
   const waits = getWaits(hand).filter((w) => w !== k);
   return waits.length > 0 && waits.every((w) => {
@@ -798,9 +1021,11 @@ function openChankan(state, kokushiOnly) {
   const { seat, tile } = state.kanPending;
   const options = {};
   for (const p of state.players) {
-    if (p.seat === seat) continue;
-    const counts = toCounts([...p.hand, tile]);
-    const ron = (kokushiOnly ? p.melds.length === 0 && isKokushi(counts) : isComplete(counts)) && !isFuritenNow(state, p.seat) &&
+    if (p.seat === seat || p.won) continue;
+    const tiles = [...p.hand, tile];
+    const counts = toCounts(tiles);
+    const wilds = tiles.filter(isWild).length;
+    const ron = (kokushiOnly ? p.melds.length === 0 && kokushiWithWild(counts, wilds) : completeWithWild(counts, wilds)) && !isFuritenNow(state, p.seat) &&
       hasYaku(state, p.seat, tile, false, { chankan: true });
     if (ron) options[p.seat] = { ron: true, pon: [], kan: [], chii: [] };
   }
@@ -837,9 +1062,9 @@ export function riichiDiscards(state, seat) {
   const player = state.players[seat];
   if (state.phase !== 'discard' || state.current !== seat || !player.drawn || player.riichi) return [];
   if (player.melds.some((m) => m.open)) return [];
-  if (state.scores[seat] < 1000 || state.wall.length < 4) return [];
+  if ((!state.rules.contest && state.scores[seat] < 1000) || state.wall.length < 4) return []; // contest riichi is free
   const tiles = [...player.hand, player.drawn];
-  return tiles.filter((t) => isTenpai(tiles.filter((x) => x !== t))).map((t) => t.id);
+  return tiles.filter((t) => !isWild(t) && isTenpai(tiles.filter((x) => x !== t))).map((t) => t.id);
 }
 
 export function canRiichi(state, seat) {
@@ -880,10 +1105,12 @@ export function autoDiscardDue(state) {
 const TERMINALS_AND_HONORS = [0, 8, 9, 17, 18, 26, 27, 28, 29, 30, 31, 32, 33];
 
 export function tileIndex(tile) {
+  if (isWild(tile)) return WILD_KIND;
   return SUITS.indexOf(tile.suit) * 9 + tile.rank - 1;
 }
 
 export function kindLabel(index) {
+  if (index === WILD_KIND) return '1A';
   const suit = SUITS[Math.floor(index / 9)];
   const rank = (index % 9) + 1;
   return suit === 'z' ? HONOR_NAMES[rank - 1] : `${rank}${suit}`;
@@ -891,7 +1118,7 @@ export function kindLabel(index) {
 
 export function toCounts(tiles) {
   const counts = new Array(34).fill(0);
-  for (const t of tiles) counts[tileIndex(t)]++;
+  for (const t of tiles) if (!isWild(t)) counts[tileIndex(t)]++; // a wild tile fits no set (yet)
   return counts;
 }
 
@@ -947,15 +1174,111 @@ export function isComplete(counts) {
 // Tile kinds (as indices) that would complete the hand.
 // Empty tenpai (karaten) counts as ready here: a wait on a kind whose four copies
 // are all in your own hand or already visible is still reported.
+// With a wild tile, the waits are every kind that completes the hand for some value of it.
 export function getWaits(tiles) {
   const counts = toCounts(tiles);
+  const wilds = tiles.filter(isWild).length;
   const waits = [];
   for (let k = 0; k < 34; k++) {
     counts[k]++;
-    if (isComplete(counts)) waits.push(k);
+    if (completeWithWild(counts, wilds)) waits.push(k);
     counts[k]--;
   }
   return waits;
+}
+
+// --- Hand shapes with wild tiles ---
+// A wild tile stands for any kind, as many copies as needed. Rather than trying all 34 values,
+// each shape check lets wild tiles fill the gaps directly. With no wild tiles these are the
+// usual checks.
+
+// Tiles (wild tiles included) that make a complete hand.
+export function isCompleteTiles(tiles) {
+  return completeWithWild(toCounts(tiles), tiles.filter(isWild).length);
+}
+
+function completeWithWild(counts, wilds) {
+  if (wilds === 0) return isComplete(counts);
+  return standardWithWild(counts, wilds) || chiitoiWithWild(counts, wilds) || kokushiWithWild(counts, wilds);
+}
+
+// A pair (natural, one tile and a wild, or two wilds) and sets.
+function standardWithWild(counts, wilds) {
+  for (let k = 0; k < 34; k++) {
+    for (const own of [2, 1]) {
+      if (counts[k] < own || wilds < 2 - own) continue;
+      counts[k] -= own;
+      const ok = setsWithWild(counts, wilds - (2 - own));
+      counts[k] += own;
+      if (ok) return true;
+    }
+  }
+  return wilds >= 2 && setsWithWild(counts, wilds - 2);
+}
+
+// The counts split into triplets and sequences, wild tiles filling in. The lowest remaining
+// tile must be in some set: a triplet of it, or a run through it (a run starting below it
+// takes its lower tiles from wild tiles, since nothing lower is left).
+function setsWithWild(counts, wilds) {
+  const i = counts.findIndex((c) => c > 0);
+  if (i === -1) return wilds % 3 === 0;
+  const own = Math.min(counts[i], 3);
+  if (3 - own <= wilds) {
+    counts[i] -= own;
+    const ok = setsWithWild(counts, wilds - (3 - own));
+    counts[i] += own;
+    if (ok) return true;
+  }
+  if (i >= 27) return false; // honors make no runs
+  for (let start = i - 2; start <= i; start++) {
+    if (start < 0 || Math.floor(start / 9) !== Math.floor(i / 9) || start % 9 > 6) continue;
+    const taken = [];
+    let need = 0;
+    for (let j = start; j < start + 3; j++) {
+      if (j >= i && counts[j] > 0) {
+        counts[j]--;
+        taken.push(j);
+      } else {
+        need++;
+      }
+    }
+    const ok = need <= wilds && setsWithWild(counts, wilds - need);
+    for (const j of taken) counts[j]++;
+    if (ok) return true;
+  }
+  return false;
+}
+
+// Seven distinct pairs, wild tiles pairing up the single tiles (or each other).
+function chiitoiWithWild(counts, wilds) {
+  if (counts.reduce((a, b) => a + b, 0) + wilds !== 14 || counts.some((c) => c > 2)) return false;
+  const pairs = counts.filter((c) => c === 2).length;
+  const singles = counts.filter((c) => c === 1).length;
+  const spare = wilds - singles;
+  return spare >= 0 && spare % 2 === 0 && pairs + singles + spare / 2 === 7;
+}
+
+// One of each terminal and honor plus one more of them, wild tiles filling in.
+function kokushiWithWild(counts, wilds) {
+  if (wilds === 0) return isKokushi(counts);
+  if (counts.reduce((a, b) => a + b, 0) + wilds !== 14) return false;
+  if (counts.some((c, k) => c > 0 && !TERMINALS_AND_HONORS.includes(k)) || counts.some((c) => c > 2)) return false;
+  const pairs = counts.filter((c) => c === 2).length;
+  const missing = TERMINALS_AND_HONORS.filter((k) => counts[k] === 0).length;
+  return pairs <= 1 && wilds === missing + 1 - pairs;
+}
+
+// Baiman contest: a hand whose other tiles are already complete sets, or six distinct pairs,
+// wins on (nearly) any tile: with four sets the wild tile pairs anything, and six distinct pairs
+// make seven pairs with any of the 28 other kinds (the paired kinds win only if the hand also
+// reads as runs, e.g. ryanpeikou, which then scores more). Either way its waits are shown as
+// the wild tile alone; getWaits still lists the real ones, for winning and furiten.
+export function waitsOnAnything(hand) {
+  if (!hand.some(isWild)) return false;
+  const rest = hand.filter((t) => !isWild(t));
+  const counts = toCounts(rest);
+  if (rest.length % 3 === 0 && canFormSets(counts)) return true;
+  return rest.length === 12 && counts.filter((c) => c === 2).length === 6;
 }
 
 export function isTenpai(tiles) {
@@ -1000,12 +1323,15 @@ function isFuritenNow(state, seat) {
 // the discarder's pond, where it still shows, not again in the caller's meld.
 export function checkIntegrity(state) {
   const meldTiles = (p) => p.melds.flatMap((m) => m.tiles.filter((t) => t.id !== m.calledId));
-  const ids = [
+  const tiles = [
     ...state.wall,
     ...state.deadWall.filter(Boolean), // drawn replacement tiles leave empty slots
     ...state.players.flatMap((p) => [...p.hand, ...(p.drawn ? [p.drawn] : []), ...p.discards, ...meldTiles(p)]),
     ...(state.robbed ? [state.robbed] : []),
-  ].map((t) => t.id);
-  const unique = new Set(ids);
-  return ids.length === 136 && unique.size === 136;
+    ...state.wins.filter((w) => w.robbed).map((w) => w.tile), // Baiman contest: robbed kan tiles
+  ];
+  // 136 tiles, plus the Baiman contest's wild tiles (at most four), each exactly once.
+  const wilds = tiles.filter(isWild).length;
+  const unique = new Set(tiles.map((t) => t.id));
+  return wilds <= 4 && tiles.length === 136 + wilds && unique.size === tiles.length;
 }

@@ -9,7 +9,7 @@ const TENPAI = '123m456p789s1122z';
 const YAKULESS_TENPAI = '111m234p567s789s5p';
 
 // Ends the hand in an exhaustive draw: seat 0 discards its drawn 5s with the wall empty.
-// (A simple, so it doesn't give seat 0 nagashi mangan.)
+// (A simple, so it doesn't give seat 0 nagashi.)
 function drawWith(hands, scores) {
   const s = table({ hands, drawn: '5s', wall: 0, scores });
   discard(s, s.players[0].drawn.id);
@@ -58,7 +58,7 @@ check('everyone starts at 25000', newHand().scores.every((x) => x === STARTING_S
   check('the next hand gets its own copy of the scores', s.scores[0] === 29000);
 }
 
-// --- Nagashi mangan ---
+// --- Nagashi ---
 
 // Seat 0 (the dealer) discards `drawn` into an empty wall after `earlier` discards.
 function drawAfterDiscards(earlier, drawn, hands = {}) {
@@ -70,7 +70,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
 
 {
   const s = drawAfterDiscards('19m1z7z', '9s', { 2: TENPAI });
-  check('dealer nagashi mangan: 4000 all, replacing noten payments',
+  check('dealer nagashi: 4000 all, replacing noten payments',
     s.result.nagashi.join() === '0' && s.result.tenpai.join() === '2' &&
     s.result.deltas.join() === '12000,-4000,-4000,-4000');
 }
@@ -82,13 +82,13 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
   s.players[1].drawn = parse('1s', 1990)[0];
   s.players[0].discards = parse('5m', 1960); // the dealer threw a simple
   discard(s, s.players[1].drawn.id);
-  check('non-dealer nagashi mangan: 4000 from the dealer, 2000 from the others',
+  check('non-dealer nagashi: 4000 from the dealer, 2000 from the others',
     s.result.nagashi.join() === '1' && s.result.deltas.join() === '-4000,8000,-2000,-2000');
 }
 
 {
   const s = drawAfterDiscards('19m5p', '9s');
-  check('one simple discard rules out nagashi mangan', s.result.nagashi.length === 0 && s.result.deltas.every((d) => d === 0));
+  check('one simple discard rules out nagashi', s.result.nagashi.length === 0 && s.result.deltas.every((d) => d === 0));
 }
 
 {
@@ -98,7 +98,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
   s.players[1].discards = parse('1p', 1950);
   s.players[1].drawn = parse('9p', 1990)[0];
   discard(s, s.players[1].drawn.id);
-  check('two players with nagashi mangan are both paid',
+  check('two players with nagashi are both paid',
     s.result.nagashi.join() === '0,1' && s.result.deltas.join() === '8000,4000,-6000,-6000' &&
     s.result.deltas.reduce((a, b) => a + b) === 0);
 }
@@ -109,7 +109,7 @@ function drawAfterDiscards(earlier, drawn, hands = {}) {
   s.players[0].melds.push({ type: 'pon', open: true, tiles: parse('555p', 3000), from: 3, calledId: 3000 });
   s.players[0].discards = parse('19m1z', 1950);
   discard(s, s.players[0].drawn.id);
-  check('nagashi mangan with an open hand', s.result.nagashi.join() === '0' && s.result.deltas.join() === '12000,-4000,-4000,-4000');
+  check('nagashi with an open hand', s.result.nagashi.join() === '0' && s.result.deltas.join() === '12000,-4000,-4000,-4000');
   check('the nagashi winner and the tenpai players reveal their hands', s.result.revealed.join() === '0,2' && s.result.tenpai.join() === '2');
 }
 

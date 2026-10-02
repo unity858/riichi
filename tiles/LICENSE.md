@@ -1,7 +1,8 @@
 # Tile images: license
 
 The SVG files in `tiles/` were cut, one file per tile, from the tile panels of
-**riichi-mahjong-tiles-svg** by max ulidtko:
+**riichi-mahjong-tiles-svg** by max ulidtko, except `tiles/tileset2/1a.svg` (the Baiman
+contest's wild tile), which was made for this project and is not covered by this file:
 
 - Source: https://github.com/tempai-dev/riichi-mahjong-tiles-svg
 - Commit: 18960b1513486c53829bbef5b6ff32ba99aa27ae (2022-05-03)

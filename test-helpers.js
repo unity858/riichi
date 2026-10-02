@@ -1,12 +1,12 @@
 // Shared helpers for the test-*.js scripts.
 import { newHand, claim } from './game.js';
 
-// Parse short notation like "123m456p11z" into tile objects (0 = red five).
+// Parse short notation like "123m456p11z" into tile objects (0 = red five, 1A = wild tile).
 // Ids start at `base` so hands built for different seats never share an id.
 export function parse(str, base = 1000) {
   const tiles = [];
   let id = base;
-  for (const [, digits, suit] of str.matchAll(/(\d+)([mpsz])/g)) {
+  for (const [, digits, suit] of str.matchAll(/(\d+)([mpszA])/g)) { // 1A: the Baiman contest's wild tile
     for (const d of digits) {
       tiles.push({ id: id++, suit, rank: d === '0' ? 5 : Number(d), red: d === '0' });
     }

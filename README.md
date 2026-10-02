@@ -12,6 +12,7 @@ Match settings (chosen by the host before the start):
 
 | Setting | Options (default first for the toggles) |
 | --- | --- |
+| Format | Standard (default), or Baiman contest: each hand deals everyone a wild tile (1A) and starts with a three-tile exchange; everyone starts on 0, a baiman or sanbaiman win scores 1 point, nobody loses points, and a hand goes on after each win until three players have won or the wall runs out (winners' hands and ura dora stay hidden until then) |
 | Length | East + South (hanchan, default), or East only (tonpuusen) |
 | Bust | on: the match ends as soon as someone is below 0 |
 | Sudden death | on: if nobody has 30,000 after the last hand, play on into the next wind until someone does |
@@ -23,7 +24,7 @@ During a hand, each player's Auto checklist (on the table) can ron and tsumo for
 
 ## Tile images
 
-Tiles are drawn with SVG pictures by default; each player can switch to text tiles (`5p`) with the "Algebraic tiles" checkbox on the table. The pictures in `tiles/tileset2/` come from [riichi-mahjong-tiles-svg](https://github.com/tempai-dev/riichi-mahjong-tiles-svg), whose author offers them under the MIT license or as public domain (CC-PDDC); see [`tiles/LICENSE.md`](tiles/LICENSE.md). They were cut from the source's single-sheet panels with `tools/cut-tiles.mjs`; to regenerate them, clone that repository into this directory and run `node tools/cut-tiles.mjs`.
+Tiles are drawn with SVG pictures by default; each player can switch to text tiles (`5p`) with the "Algebraic tiles" checkbox on the table. The pictures in `tiles/tileset2/` come from [riichi-mahjong-tiles-svg](https://github.com/tempai-dev/riichi-mahjong-tiles-svg), whose author offers them under the MIT license or as public domain (CC-PDDC); see [`tiles/LICENSE.md`](tiles/LICENSE.md). The wild tile `tiles/tileset2/1a.svg` (Baiman contest) was made for this project. The others were cut from the source's single-sheet panels with `tools/cut-tiles.mjs`; to regenerate them, clone that repository into this directory and run `node tools/cut-tiles.mjs`.
 
 ## Debugging options
 
@@ -68,6 +69,8 @@ Positions (seats counted from the dealer):
 | 128-135 | dead wall: the indicator and ura indicator each kan reveals (128/129 for the first kan, then 130/131, ...) |
 
 Each kan also moves the last live-wall tile to the dead wall, so the live wall ends one tile earlier per kan.
+
+In a Baiman contest everyone's 13th tile is the wild tile `1A` instead, which isn't part of the wall: positions 48-51 aren't dealt, so 48 is the dealer's first draw and 49-121 are the remaining draws.
 
 The server logs every hand's full seed (`Seed: ...`), including random games, so any hand can be replayed. See `seeds/` for examples.
 

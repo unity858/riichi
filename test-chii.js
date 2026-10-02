@@ -106,7 +106,7 @@ const labels = (s, seat) => chiiOptions(s, seat)
     if (s.phase === 'discard') discard(s, s.players[s.current].drawn.id);
     passClaims(s);
   }
-  check('a player whose discard was called loses nagashi mangan',
+  check('a player whose discard was called loses nagashi',
     !s.result.nagashi.includes(0) && s.result.nagashi.join() === '1,2,3');
 }
 

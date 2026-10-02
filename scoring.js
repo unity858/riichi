@@ -160,7 +160,7 @@ function isPinfu(reading, ctx, closed) {
 
 // Yaku rebalance (a room option, ctx.rebalance): sanshoku doukou is 3 han, ryanpeikou 6,
 // sankantsu a yakuman, suukantsu a double yakuman, the new shoutate SHOUTATE_HAN han, the new
-// renhou a flat RENHOU_HAN (see scoreHand), and nagashi mangan (in game.js) a baiman.
+// renhou a flat RENHOU_HAN (see scoreHand), and nagashi (in game.js) a baiman.
 const SHOUTATE_HAN = 2;
 const RENHOU_HAN = 8;
 

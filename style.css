@@ -119,6 +119,7 @@ button.call-kan { color: #f0f; }
 .tile.p { color: #1565c0; }
 .tile.s { color: #2e7d32; }
 .tile.z { color: #222; }
+.tile.A { color: #7b1fa2; } /* the wild tile, in algebraic mode */
 .tile.red { background: #ffe1e1; color: #d50000; }
 
 /* Tsumogiri discards (thrown straight after drawing) are a shade darker. */
@@ -246,3 +247,10 @@ button.selected { outline: 2px solid #1565c0; }
 #auto-settings { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 4px 8px; font-size: 0.85em; border: 1px solid #ccc; border-radius: 6px; }
 #auto-settings[hidden] { display: none; }
 #auto-settings legend { padding: 0 4px; color: #555; }
+
+/* Radio-button settings (the format). */
+.setting-radios { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.contest-win { font-size: 0.9em; color: #555; }
+.rules-toggle { cursor: pointer; color: #1565c0; font-size: 0.9em; user-select: none; }
+.rules-toggle:hover { text-decoration: underline; }
+.passes { font-size: 0.9em; color: #555; }

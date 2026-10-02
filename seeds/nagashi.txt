@@ -1,8 +1,8 @@
-# Nagashi mangan: everyone discards their draw, and all of East's draws are terminals or honors.
+# Nagashi: everyone discards their draw, and all of East's draws are terminals or honors.
 #   Every tab (East, South, West, North in turn): press Space to discard each draw, all hand long.
 #   You may be offered 6 calls along the way (pon or chii): press Skip. Nobody can win.
 #   East's 18 discards are all 1s, 9s and honors, none of them called.
-#   Expect: the wall runs out; exhaustive draw with nagashi mangan for East, paid like a dealer
+#   Expect: the wall runs out; exhaustive draw with nagashi for East, paid like a dealer
 #   mangan tsumo: 4,000 from each player (no noten payments). Nobody is tenpai, so only East's
 #   hand is revealed, and the deal passes on: the next hand is East 2 with 1 honba.
 # Run: DEBUG_SEED=seeds/nagashi.txt npm start

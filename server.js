@@ -14,7 +14,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  newHand, draw, discard, tsumo, claim, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
+  newHand, draw, discard, tsumo, claim, chooseExchange, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
   canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions, waitYaku, discardPreview,
   autoDiscardDue, furitenStatus, createWall, checkIntegrity,
 } from './game.js';
@@ -104,13 +104,17 @@ function hostSeat(room) {
 
 // Per-seat game view: your own hand is visible, others show only a tile count. When a hand
 // ends, the winners' hands are shown to everyone; after a draw, the result lists them
-// (tenpai players and nagashi mangan winners after an exhaustive draw).
+// (tenpai players and nagashi winners after an exhaustive draw).
 function gameView(room, seat) {
   const state = room.state;
   if (!state) return null;
   const revealed = state.result?.winners ?? state.result?.revealed ?? [];
   const visible = (p) => p.seat === seat || revealed.includes(p.seat);
   const me = seat !== null && seat >= 0 ? seat : null;
+  // With the "no hints" setting, nothing that only helps is sent: your waits, discard previews
+  // and furiten, which discards were tsumogiri, and ippatsu. Legal actions still are (the
+  // Riichi, Tsumo, Ron and call buttons), since the game needs them.
+  const hints = !room.match?.settings.noHints;
   // With "skip calls" on, you are never offered a pon, chii or kan (autoPlay passes for you).
   const skip = me !== null && autoOf(room, me).skipCalls;
   const calls = (options) => (me === null || skip ? [] : options(state, me));
@@ -130,9 +134,18 @@ function gameView(room, seat) {
   // the tile is called or skipped and the next player draws. It is the same whether or not
   // someone could call the tile (or rob a kan, where the kan player keeps it).
   let turn = state.current;
-  if (state.phase === 'claim') turn = state.lastDiscard.from;
-  else if (state.phase === 'draw') turn = state.discardLog.at(-1)?.from ?? state.current;
+  if (state.phase === 'exchange') turn = null; // everyone picks at once
+  else if (state.phase === 'claim') turn = state.lastDiscard.from;
+  // In a Baiman contest's pause after a win it is the winner on a tsumo, the discarder on a ron.
+  else if (state.phase === 'draw') turn = state.pauseTurn ?? state.discardLog.at(-1)?.from ?? state.current;
   return {
+    contest: state.rules.contest, // the Baiman contest format
+    passes: state.passes, // after the tile exchange, who passed to whom: player n to passes[n]
+    // The tile exchange: your own pick, and who has picked (not what).
+    exchange: state.exchange && {
+      mine: me !== null ? state.exchange.picks[me] : null,
+      picked: state.exchange.picks.map(Boolean),
+    },
     dealer: state.dealer,
     current: state.current,
     turn,
@@ -143,6 +156,11 @@ function gameView(room, seat) {
     honba: state.honba,
     wallCount: state.wall.length,
     doraIndicators: state.doraIndicators,
+    // Baiman contest, during the hand: each win's han are public (a yakuman shows as such)...
+    contestWins: state.wins.map((w) => ({ seat: w.seat, han: w.score.han, yakuman: w.score.yakuman, limit: w.score.limit })),
+    // ...but the ura dora only go to a player who has won in riichi. Everyone sees them in the
+    // result when the hand ends (if a riichi hand won).
+    uraIndicators: me !== null && state.players[me].won && state.players[me].riichi ? state.uraIndicators : null,
     lastDiscard: hidden ? null : state.lastDiscard, // the outlined tile, only for those who can call it
     result: state.result,
     canTsumo: me !== null && canTsumo(state, me),
@@ -154,21 +172,25 @@ function gameView(room, seat) {
     kanOptions: calls(kanOptions), // closed or added kans on your own turn
     riichiDiscards: me !== null ? riichiDiscards(state, me) : [],
     autoDiscarding: me !== null && state.current === me && autoDiscardTile(room) !== null,
-    furiten: me !== null ? furitenStatus(state, me) : null, // your own only: it reveals your waits
-    waits: me !== null ? waitYaku(state, me) : [], // your own only, likewise: [{ kind, ron, tsumo }]
-    discardPreview: me !== null ? discardPreview(state, me) : {}, // on your turn: waits after each discard
+    noHints: !hints,
+    furiten: me !== null && hints ? furitenStatus(state, me) : null, // your own only: it reveals your waits
+    waits: me !== null && hints ? waitYaku(state, me) : [], // your own only, likewise: [{ kind, ron, tsumo }]
+    discardPreview: me !== null && hints ? discardPreview(state, me) : {}, // on your turn: waits after each discard
     players: state.players.map((p) => ({
       seat: p.seat,
       discards: p.discards,
-      tsumogiri: p.tsumogiri,
+      tsumogiri: hints ? p.tsumogiri : p.tsumogiri.map(() => false),
       called: p.called,
       melds: p.melds, // open melds are public
       handCount: p.hand.length,
       hasDrawn: !!p.drawn,
       hand: visible(p) ? p.hand : null,
       drawn: visible(p) ? p.drawn : null,
-      riichi: p.riichi, // { turn, discardIndex, double, ippatsu } is public knowledge
+      // { turn, discardIndex, double, ippatsu } is public knowledge; ippatsu is a hint.
+      riichi: p.riichi && !hints ? { ...p.riichi, ippatsu: false } : p.riichi,
       callout: p.callout, // set only once a call has happened, so it reveals nothing early
+      // Baiman contest: that they won, and how, is public; the hand and its score stay hidden.
+      won: p.won ? { type: p.won.type } : null,
     })),
   };
 }
@@ -260,7 +282,9 @@ function autoPlay(room) {
   const state = room.state;
   if (!state) return false;
   if (state.phase === 'discard' && autoOf(room, state.current).win && canTsumo(state, state.current)) {
-    return tsumo(state, state.current);
+    tsumo(state, state.current);
+    drawAfterPause(room); // a Baiman contest goes on after a tsumo
+    return true;
   }
   if (state.phase !== 'claim') return false;
   let acted = false;
@@ -452,6 +476,12 @@ function handle(ws, msg) {
     update(room);
   } else if (!state || state.phase === 'ended') {
     // No game actions between hands.
+  } else if (msg.type === 'exchange') {
+    // A Baiman contest hand's tile exchange; once all four have picked, the dealer draws.
+    if (chooseExchange(state, seat, msg.tiles)) {
+      if (state.phase === 'draw') draw(state);
+      update(room);
+    }
   } else if (msg.type === 'discard' && state.current === seat) {
     // A riichi player's unusable draw is discarded by the timer, not by hand. If someone
     // can call the discard, nothing is drawn until they decide; otherwise after a pause.
@@ -468,7 +498,10 @@ function handle(ws, msg) {
   } else if (msg.type === 'kyuushu') {
     if (declareKyuushu(state, seat)) update(room);
   } else if (msg.type === 'tsumo') {
-    if (tsumo(state, seat)) update(room);
+    if (tsumo(state, seat)) {
+      drawAfterPause(room); // a Baiman contest goes on after a tsumo
+      update(room);
+    }
   } else if (['ron', 'kan', 'pon', 'chii', 'pass'].includes(msg.type)) {
     if (claim(state, seat, msg.type, Array.isArray(msg.tiles) ? msg.tiles : null)) {
       // If everyone passed, the next player draws now: the decisions already took time.
