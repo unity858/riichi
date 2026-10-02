@@ -84,6 +84,7 @@ button.call-kan { color: #f0f; }
 .waits { font-size: 0.85em; color: #a86b00; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .waits .wait { display: inline-flex; align-items: center; gap: 3px; }
 .waits .tile { width: 24px; height: 32px; font-size: 11px; border-bottom-width: 3px; }
+.waits .wait-left { color: #555; }
 .waits .furiten-tag { color: orange; font-weight: bold; }
 
 .pond {
@@ -226,3 +227,8 @@ button.selected { outline: 2px solid #1565c0; }
 .callout-kan { color: #f0f; }
 .callout-riichi { color: #000; background: #ffa500; border-color: #c77d00; }
 .callout-ron, .callout-tsumo { color: #fff; background: #d32f2f; border-color: #d32f2f; }
+
+/* The auto play checklist. */
+#auto-settings { display: flex; flex-direction: column; gap: 2px; margin: 8px 0 0; padding: 4px 8px; font-size: 0.85em; border: 1px solid #ccc; border-radius: 6px; }
+#auto-settings[hidden] { display: none; }
+#auto-settings legend { padding: 0 4px; color: #555; }

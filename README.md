@@ -19,7 +19,26 @@ Match settings (chosen by the host before the start):
 
 Fixed rules: the dealer repeats after a win or when tenpai at an exhaustive draw; honba go up on a repeat and on every exhaustive draw, reset after a non-dealer win, and are worth 300 each to the winner; riichi sticks left at the end go to first place.
 
-`DRAW_DELAY_MS=0 npm start` skips the 2-second pause after uncallable discards, for quicker testing.
+During a hand, each player's Auto checklist (on the table) can ron and tsumo for them whenever it is legal, skip every pon, chii and kan offer, and discard each draw (tsumogiri, never a tile that could be a tsumo). It can be changed at any time and switches off at the start of every hand.
+
+## Debugging options
+
+Environment variables, set before `npm start`; they can be combined:
+
+| Variable | Effect |
+| --- | --- |
+| `NO_DELAYS=1` | removes every artificial pause: the three below, and the 1-second hold on a ron or tsumo before the result is shown |
+| `DRAW_DELAY_MS` | pause after a discard nobody can call, before the next draw (default 2000) |
+| `AUTO_DISCARD_MS` | pause before a draw is discarded automatically, in riichi or with auto tsumogiri (default 1000) |
+| `KAN_DRAW_MS` | pause after a kan, before the replacement tile (default 500) |
+| `DEBUG_SEED` | a fixed wall for every hand, from a seed file or a seed string (see below) |
+| `PORT` | the server port (default 8080) |
+
+```
+NO_DELAYS=1 npm start                                 # no pauses at all
+DRAW_DELAY_MS=0 npm start                             # no pause before draws only
+NO_DELAYS=1 DEBUG_SEED=seeds/kan-manual.txt npm start # a fixed hand, no pauses
+```
 
 ## Testing with a fixed wall (seeds)
 

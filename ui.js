@@ -2,7 +2,7 @@
 // Three screens: the lobby (name, create or join a room), the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, calledTilePosition, WINDS } from './game.js';
+import { tileLabel, tileIndex, calledTilePosition, WINDS } from './game.js';
 
 const $ = (id) => document.getElementById(id);
 const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table') };
@@ -16,6 +16,8 @@ const kyuushuBtn = $('kyuushu');
 const ronBtn = document.getElementById('ron');
 const passBtn = document.getElementById('pass');
 const callOptionsEl = document.getElementById('call-options');
+const autoEl = $('auto-settings');
+const autoBoxes = [...autoEl.querySelectorAll('input[data-auto]')];
 const seatEls = {
   bottom: document.querySelector('.seat-bottom'),
   right: document.querySelector('.seat-right'),
@@ -77,7 +79,8 @@ ws.addEventListener('message', (e) => {
 
 // When a hand is won by ron or tsumo, the table stays as it was for CALLOUT_HOLD_MS with the
 // winners' callouts showing, and nothing can be clicked; then the result is shown. States that
-// arrive meanwhile are kept, and the latest one is shown when the pause ends.
+// arrive meanwhile are kept, and the latest one is shown when the pause ends. The server's
+// NO_DELAYS flag turns this off.
 const CALLOUT_HOLD_MS = 1000;
 let holdTimer = null;
 let latestState = null;
@@ -85,7 +88,7 @@ function showState(msg) {
   latestState = msg;
   if (holdTimer) return;
   const playing = view?.game && view.game.phase !== 'ended';
-  if (playing && ['ron', 'tsumo'].includes(msg.game?.result?.type)) {
+  if (playing && !msg.noDelays && ['ron', 'tsumo'].includes(msg.game?.result?.type)) {
     view = heldView(view, msg);
     render();
     holdTimer = setTimeout(() => {
@@ -246,12 +249,39 @@ function renderWaiting() {
 // Fills a waits display: each wait as a tile, noting if winning on it has no yaku or only by
 // tsumo (atozuke), then a single "(furiten)" for the whole hand. Used by your waits line and
 // by the discard preview.
+// How many copies of each tile kind (0-33) you can't see: 4, less those in your hand, the
+// ponds, the melds and the dora indicators. A called tile is both in a pond and in a meld, so
+// tiles are counted once by id.
+function unseenCounts(game, you) {
+  const seen = new Map();
+  const add = (t) => t && seen.set(t.id, t);
+  game.doraIndicators.forEach(add);
+  for (const p of game.players) {
+    p.discards.forEach(add);
+    for (const m of p.melds) m.tiles.forEach(add);
+    if (p.seat === you) {
+      (p.hand ?? []).forEach(add);
+      add(p.drawn);
+    }
+  }
+  const counts = Array(34).fill(4);
+  for (const t of seen.values()) counts[tileIndex(t)]--;
+  return counts;
+}
+
+// Each wait is its tile, then how many copies are left unseen, then any note about yaku.
 function fillWaits(container, waits, furiten) {
+  const unseen = unseenCounts(view.game, view.you);
   container.append('Tenpai:');
   for (const w of waits) {
     const item = document.createElement('span');
     item.className = 'wait';
     item.appendChild(tileEl(tileOfKind(w.kind)));
+    const left = document.createElement('span');
+    left.className = 'wait-left';
+    left.textContent = `×${unseen[w.kind]}`;
+    left.title = `${unseen[w.kind]} not visible to you`;
+    item.appendChild(left);
     if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
     container.appendChild(item);
   }
@@ -535,7 +565,7 @@ function statusText(game, you) {
     return can.length ? `You can ${can.join(' or ')} on ${tile}` : '';
   }
   if (game.current === you && choosingRiichi) return 'Riichi: choose a tile to discard';
-  if (game.current === you && game.autoDiscarding) return 'Riichi: discarding…';
+  if (game.current === you && game.autoDiscarding) return game.players[you].riichi ? 'Riichi: discarding…' : 'Auto: discarding…';
   if (game.current === you && game.players[you].riichi) {
     const options = [game.canTsumo && 'tsumo', game.kanOptions.length && 'kan'].filter(Boolean).join(' or ');
     return `Riichi: ${options}, or click the drawn tile to pass`;
@@ -600,6 +630,8 @@ function render() {
     ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
     <div class="room-code">Room ${room.code}</div>
   `;
+  autoEl.hidden = you === null;
+  for (const box of autoBoxes) box.checked = !!view.auto?.[box.dataset.auto];
   const ended = game.phase === 'ended';
   nextHandBtn.hidden = !ended || match.over || you === null;
   rematchBtn.hidden = !match.over || you !== room.hostSeat;
@@ -640,6 +672,13 @@ riichiBtn.addEventListener('click', () => {
   choosingRiichi = !choosingRiichi;
   render();
 });
+
+// Any change sends the whole checklist; the server keeps it for your seat.
+for (const box of autoBoxes) {
+  box.addEventListener('change', () => {
+    send({ type: 'auto', settings: Object.fromEntries(autoBoxes.map((b) => [b.dataset.auto, b.checked])) });
+  });
+}
 
 nextHandBtn.addEventListener('click', () => send({ type: 'nextHand' }));
 rematchBtn.addEventListener('click', () => send({ type: 'rematch' }));

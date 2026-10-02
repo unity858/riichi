@@ -21,15 +21,19 @@ import {
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
 
-// How long a riichi player's unusable draw is shown before it is discarded for them.
-const AUTO_DISCARD_MS = 1000;
+// Debugging: NO_DELAYS=1 removes every artificial pause: the three below (each can also be set
+// on its own) and, in the browser, the hold on a win before its result (see viewFor).
+const NO_DELAYS = !!process.env.NO_DELAYS && process.env.NO_DELAYS !== '0';
+const delay = (name, ms) => (NO_DELAYS ? 0 : Number(process.env[name] ?? ms));
+// How long a draw the server discards for a player (see autoDiscardTile) is shown first.
+const AUTO_DISCARD_MS = delay('AUTO_DISCARD_MS', 1000);
 // Pause after a discard nobody can call, before the next draw. A discard somebody can call
 // makes everyone wait while they decide, so without this pause the wait itself would show
 // that someone had an option. DRAW_DELAY_MS overrides it (e.g. 0 for automated tests).
-const DRAW_DELAY_MS = Number(process.env.DRAW_DELAY_MS ?? 2000);
+const DRAW_DELAY_MS = delay('DRAW_DELAY_MS', 2000);
 // Pause after a kan, before the replacement draw. The pause when an added kan could be robbed
 // (chankan) then looks like any other kan's.
-const KAN_DRAW_MS = 500;
+const KAN_DRAW_MS = delay('KAN_DRAW_MS', 500);
 // A room with nobody connected is deleted after this long.
 const EMPTY_ROOM_MS = 10 * 60 * 1000;
 
@@ -97,16 +101,23 @@ function hostSeat(room) {
 // Per-seat game view: your own hand is visible, others show only a tile count. When a hand
 // ends, the winners' hands are shown to everyone; after a draw, the result lists them
 // (tenpai players and nagashi mangan winners after an exhaustive draw).
-function gameView(state, seat) {
+function gameView(room, seat) {
+  const state = room.state;
   if (!state) return null;
   const revealed = state.result?.winners ?? state.result?.revealed ?? [];
   const visible = (p) => p.seat === seat || revealed.includes(p.seat);
   const me = seat !== null && seat >= 0 ? seat : null;
+  // With "skip calls" on, you are never offered a pon, chii or kan (autoPlay passes for you).
+  const skip = me !== null && autoOf(room, me).skipCalls;
+  const calls = (options) => (me === null || skip ? [] : options(state, me));
+  const pon = calls(ponOptions);
+  const chii = calls(chiiOptions);
+  const openKan = calls(openKanOptions);
   // While players decide on a discard (or a kan that could be robbed), only they see it: to
   // everyone else this looks exactly like the pause before the next draw, so nothing shows
   // that someone could call.
   const deciding = state.phase === 'claim' && me !== null &&
-    (canRon(state, me) || ponOptions(state, me).length > 0 || chiiOptions(state, me).length > 0 || openKanOptions(state, me).length > 0);
+    (canRon(state, me) || pon.length > 0 || chii.length > 0 || openKan.length > 0);
   const hidden = state.phase === 'claim' && !deciding;
   // Hidden decisions look like the pause they replace: before a draw, or (for a kan that could
   // be robbed) before the replacement draw.
@@ -133,12 +144,12 @@ function gameView(state, seat) {
     canTsumo: me !== null && canTsumo(state, me),
     canRon: me !== null && canRon(state, me),
     canKyuushu: me !== null && canKyuushu(state, me),
-    ponOptions: me !== null ? ponOptions(state, me) : [], // pairs of your own tile ids
-    chiiOptions: me !== null ? chiiOptions(state, me) : [],
-    openKanOptions: me !== null ? openKanOptions(state, me) : [], // the three tile ids, on a discard
-    kanOptions: me !== null ? kanOptions(state, me) : [], // closed or added kans on your own turn
+    ponOptions: pon, // pairs of your own tile ids
+    chiiOptions: chii,
+    openKanOptions: openKan, // the three tile ids, on a discard
+    kanOptions: calls(kanOptions), // closed or added kans on your own turn
     riichiDiscards: me !== null ? riichiDiscards(state, me) : [],
-    autoDiscarding: me !== null && state.current === me && autoDiscardDue(state),
+    autoDiscarding: me !== null && state.current === me && autoDiscardTile(room) !== null,
     furiten: me !== null ? furitenStatus(state, me) : null, // your own only: it reveals your waits
     waits: me !== null ? waitYaku(state, me) : [], // your own only, likewise: [{ kind, ron, tsumo }]
     discardPreview: me !== null ? discardPreview(state, me) : {}, // on your turn: waits after each discard
@@ -164,6 +175,7 @@ function viewFor(room, ws) {
   const m = room.match;
   return {
     type: 'state',
+    noDelays: NO_DELAYS,
     you,
     room: {
       code: room.code,
@@ -182,7 +194,8 @@ function viewFor(room, ws) {
       final: m.final,
       history: m.history,
     },
-    game: gameView(room.state, you),
+    auto: you !== null ? autoOf(room, you) : null,
+    game: gameView(room, you),
   };
 }
 
@@ -204,16 +217,78 @@ function checkEmpty(room) {
   }, EMPTY_ROOM_MS);
 }
 
+// --- Auto play ---
+// Each seated player can switch these on or off at any time, even mid hand. They all switch
+// off at the start of each hand (see startHand).
+//   win:       ron or tsumo whenever it is legal;
+//   skipCalls: never pon, chii or kan (the offers are passed and their buttons hidden);
+//   tsumogiri: discard every draw after AUTO_DISCARD_MS, unless it could be a tsumo.
+const AUTO_KEYS = ['win', 'skipCalls', 'tsumogiri'];
+const autoOf = (room, seat) => room.seats[seat]?.auto ?? {};
+
+function normalizeAuto(input) {
+  const auto = {};
+  for (const key of AUTO_KEYS) auto[key] = !!(input && typeof input === 'object' && input[key] === true);
+  return auto;
+}
+
+
+// The drawn tile the server will discard for the current player, or null: a riichi player's
+// draw they can't use (one allowing a kan too, if they skip calls), or any draw with auto
+// tsumogiri. A draw that could be a tsumo is never thrown away automatically.
+function autoDiscardTile(room) {
+  const state = room.state;
+  if (!state || state.phase !== 'discard') return null;
+  const seat = state.current;
+  const player = state.players[seat];
+  const auto = autoOf(room, seat);
+  if (!player.drawn || canTsumo(state, seat)) return null;
+  const riichiLocked = player.riichi && player.riichi.discardIndex !== player.discards.length;
+  if (autoDiscardDue(state) || (riichiLocked && auto.skipCalls) || auto.tsumogiri) return player.drawn.id;
+  return null;
+}
+
+// Makes the decisions auto settings make for players: a win when one is legal, and a pass on
+// a discard (or kan) offering only calls. Returns true if anything happened. It runs just after
+// each new state is sent, so a ronned tile reaches the pond first. A pass that ends the claim
+// is followed by the usual pause before the draw, as if nobody could have called.
+function autoPlay(room) {
+  const state = room.state;
+  if (!state) return false;
+  if (state.phase === 'discard' && autoOf(room, state.current).win && canTsumo(state, state.current)) {
+    return tsumo(state, state.current);
+  }
+  if (state.phase !== 'claim') return false;
+  let acted = false;
+  for (const seat of Object.keys(state.claims).map(Number)) {
+    if (state.phase !== 'claim' || state.claims[seat] !== null) continue;
+    const auto = autoOf(room, seat);
+    const ron = canRon(state, seat);
+    const action = ron ? (auto.win ? 'ron' : null) : auto.skipCalls ? 'pass' : null;
+    if (action && claim(state, seat, action)) acted = true;
+  }
+  if (acted) drawAfterPause(room);
+  return acted;
+}
+
+function scheduleAutoPlay(room) {
+  const hand = room.state;
+  if (!hand || hand.phase === 'ended') return;
+  setTimeout(() => {
+    if (room.state === hand && autoPlay(room)) update(room);
+  }, 0);
+}
+
 // --- Hands ---
 
-// A riichi player's draw that can't be used is shown for AUTO_DISCARD_MS, then discarded
-// for them. The timer checks it is still the same hand and the same drawn tile.
+// A draw the server discards for the player (see autoDiscardTile) is shown for AUTO_DISCARD_MS
+// first. The timer checks it is still the same hand and the same drawn tile.
 function scheduleAutoDiscard(room) {
   const hand = room.state;
-  if (!hand || !autoDiscardDue(hand)) return;
-  const tileId = hand.players[hand.current].drawn.id;
+  const tileId = autoDiscardTile(room);
+  if (tileId === null) return;
   setTimeout(() => {
-    if (room.state !== hand || !autoDiscardDue(hand) || hand.players[hand.current].drawn?.id !== tileId) return;
+    if (room.state !== hand || autoDiscardTile(room) !== tileId) return;
     if (discard(hand, tileId)) drawAfterPause(room);
     update(room);
   }, AUTO_DISCARD_MS);
@@ -251,12 +326,14 @@ function update(room) {
     recordHand(room.match, room.state);
   }
   broadcast(room);
+  scheduleAutoPlay(room);
   scheduleAutoDiscard(room);
   scheduleRinshan(room);
 }
 
 // Every hand's full seed is logged, so any hand can be replayed with DEBUG_SEED.
 function startHand(room) {
+  for (const p of room.seats) if (p) p.auto = normalizeAuto({});
   const wall = SEED ? wallFromSeed(SEED) : createWall();
   room.state = newHand({ ...handSettings(room.match), wall });
   console.log(`[${room.code}] ${handLabel(room.match)}, ${room.match.honba} honba. Integrity: ${checkIntegrity(room.state)}. Seed: ${seedFromWall(wall)}`);
@@ -360,7 +437,14 @@ function handle(ws, msg) {
     startHand(room);
     update(room);
   } else if (msg.type === 'rematch' && isHost && room.match?.over) {
-    startMatch(room);
+    // Back to the waiting room, where the host can change settings and start again. Seats of
+    // players who are gone are freed, as if they had left before the match.
+    room.match = null;
+    room.state = null;
+    room.seats = room.seats.map((p) => (p?.ws ? p : null));
+    broadcast(room);
+  } else if (msg.type === 'auto') {
+    room.seats[seat].auto = normalizeAuto(msg.settings);
     update(room);
   } else if (!state || state.phase === 'ended') {
     // No game actions between hands.
@@ -405,4 +489,4 @@ wss.on('connection', (ws) => {
   ws.on('close', () => leaveRoom(ws));
 });
 
-server.listen(PORT, () => console.log(`Mahjong server on http://localhost:${PORT}`));
+server.listen(PORT, () => console.log(`Mahjong server on http://localhost:${PORT}${NO_DELAYS ? ' (NO_DELAYS: no pauses)' : ''}`));
