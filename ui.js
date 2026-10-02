@@ -2,7 +2,7 @@
 // Three screens: the lobby (name, create or join a room), the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS } from './game.js';
+import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS, waitYaku, furitenStatus, discardPreview } from './game.js';
 import { replaySteps } from './replay.js';
 
 const $ = (id) => document.getElementById(id);
@@ -427,6 +427,21 @@ $('matches-back').addEventListener('click', () => navigate('./'));
 let replayMatch = null; // { key: room + start, data, steps: each hand's steps once worked out }
 let replayPos = { hand: 0, step: 0 };
 let replayPov = 0;
+// The replay's two settings, kept per browser: other players' hands face up (or only yours and
+// those the game would reveal at the end), and the waits (lines and hover previews, as in play).
+let replayShowHands = localStorage.getItem('riichiReplayHands') !== '0';
+let replayShowWaits = localStorage.getItem('riichiReplayWaits') === '1';
+for (const [id, key, get, set] of [
+  ['replay-show-hands', 'riichiReplayHands', () => replayShowHands, (v) => (replayShowHands = v)],
+  ['replay-show-waits', 'riichiReplayWaits', () => replayShowWaits, (v) => (replayShowWaits = v)],
+]) {
+  $(id).checked = get();
+  $(id).addEventListener('change', () => {
+    set($(id).checked);
+    localStorage.setItem(key, $(id).checked ? '1' : '0');
+    if (replayMatch && view?.replay) renderReplay();
+  });
+}
 
 async function showReplay() {
   const room = query('room');
@@ -457,7 +472,7 @@ async function showReplay() {
   const { hands } = replayMatch.data;
   const hand = clamp(Number(query('hand') ?? 1) - 1, 0, hands.length - 1);
   replayPos = { hand, step: clamp(Number(query('step') ?? 0), 0, lastStep(hand)) };
-  renderReplay();
+  renderReplay({ arrived: true });
 }
 
 // A hand's steps (worked out once), and the index of its last step (the hand's end). A hand
@@ -474,7 +489,9 @@ function handSteps(hand) {
 const lastStep = (hand) => handSteps(hand).length - 1;
 const clamp = (n, lo, hi) => (Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : lo);
 
-function renderReplay() {
+// arrived: the replay came to this step by stepping, a link or Back/Forward (not a Round button
+// or a redraw), so a hand's result alerts its scoring.
+function renderReplay({ arrived = false } = {}) {
   const m = replayMatch.data;
   const h = m.hands[replayPos.hand];
   const { step } = replayPos;
@@ -489,7 +506,10 @@ function renderReplay() {
   }
   const last = replayPos.hand === m.hands.length - 1 && step === lastStep(replayPos.hand);
   view = {
-    replay: { note: describeStep(handSteps(replayPos.hand)[step], h, m.players) },
+    replay: {
+      note: describeStep(handSteps(replayPos.hand)[step], h, m.players),
+      scoreAlert: arrived && step === lastStep(replayPos.hand) ? `replay ${++scoreAlerts}` : null,
+    },
     you: replayPov,
     auto: null,
     room: { code: m.room, started: true, hostSeat: 0, settings: m.settings, seats: m.players.map((name, i) => ({ name: name ?? `Player ${i + 1}`, connected: true })) },
@@ -508,9 +528,27 @@ function renderReplay() {
   render();
 }
 
-// The replayed state as the table expects it: like the server's view, but every hand shown and
-// nothing to do (no buttons, clicks or hints).
+// The replayed state as the table expects it: like the server's view, with nothing to do (no
+// buttons or clicks). Hands are shown face up as the two settings say: yours (the seat watched
+// from) always, the others with "Show other hands", and at the end those the game reveals. With
+// "Show waits", each face-up hand gets its waits and furiten (replayWaits, replayFuriten), and
+// whoever is about to discard the waits each discard would leave (replayPreview), worked out
+// with the game's own functions.
 function replayGameView(s) {
+  const revealed = s.result?.winners ?? s.result?.revealed ?? [];
+  const shown = (seat) => replayShowHands || seat === replayPov || revealed.includes(seat);
+  const waitsOf = (p) => {
+    if (!replayShowWaits || !shown(p.seat) || s.phase === 'ended') return {};
+    const extra = {};
+    if (!p.drawn && p.hand.length % 3 === 1) {
+      const f = furitenStatus(s, p.seat);
+      Object.assign(extra, { replayWaits: waitYaku(s, p.seat), replayFuriten: f.discard || f.temporary || f.riichi });
+    }
+    if (s.phase === 'discard' && s.current === p.seat) {
+      extra.replayPreview = Object.fromEntries(Object.entries(discardPreview(s, p.seat)).map(([id, v]) => [id, { ...v, seat: p.seat }]));
+    }
+    return extra;
+  };
   let turn = s.current;
   if (s.phase === 'claim') turn = s.lastDiscard.from;
   else if (s.phase === 'draw') turn = s.discardLog.at(-1)?.from ?? s.current;
@@ -522,7 +560,8 @@ function replayGameView(s) {
     canTsumo: false, canRon: false, canKyuushu: false, ponOptions: [], chiiOptions: [], openKanOptions: [], kanOptions: [], riichiDiscards: [],
     players: s.players.map((p) => ({
       seat: p.seat, discards: p.discards, tsumogiri: p.tsumogiri, called: p.called, melds: p.melds,
-      handCount: p.hand.length, hasDrawn: !!p.drawn, hand: p.hand, drawn: p.drawn, riichi: p.riichi, callout: p.callout, won: null,
+      handCount: p.hand.length, hasDrawn: !!p.drawn, hand: shown(p.seat) ? p.hand : null, drawn: shown(p.seat) ? p.drawn : null,
+      riichi: p.riichi, callout: p.callout, won: null, ...waitsOf(p),
     })),
   };
 }
@@ -570,7 +609,7 @@ function stepReplay(by, dir) {
   }
   if (hand === replayPos.hand && step === replayPos.step) return;
   replayPos = { hand, step };
-  renderReplay();
+  renderReplay({ arrived: by === 'step' });
 }
 $('round-prev').addEventListener('click', () => stepReplay('round', -1));
 $('round-next').addEventListener('click', () => stepReplay('round', 1));
@@ -641,7 +680,8 @@ function renderWaiting() {
 // by the discard preview.
 // How many copies of each tile kind (0-33) you can't see: 4, less those in your hand, the
 // ponds, the melds and the dora indicators. A called tile is both in a pond and in a meld, so
-// tiles are counted once by id.
+// tiles are counted once by id. In a replay, every hand shown face up counts too (with "Show
+// other hands", copies in the others' hands are visible; a hidden hand comes with no tiles).
 function unseenCounts(game, you) {
   const seen = new Map();
   const add = (t) => t && seen.set(t.id, t);
@@ -649,7 +689,7 @@ function unseenCounts(game, you) {
   for (const p of game.players) {
     p.discards.forEach(add);
     for (const m of p.melds) m.tiles.forEach(add);
-    if (p.seat === you) {
+    if (p.seat === you || view?.replay) {
       (p.hand ?? []).forEach(add);
       add(p.drawn);
     }
@@ -659,9 +699,10 @@ function unseenCounts(game, you) {
   return counts;
 }
 
-// Each wait is its tile, then how many copies are left unseen, then any note about yaku.
-function fillWaits(container, waits, furiten) {
-  const unseen = unseenCounts(view.game, view.you);
+// Each wait is its tile, then how many copies are left unseen (by you; in a replay, by whoever
+// watches, from the hands shown face up), then any note about yaku.
+function fillWaits(container, waits, furiten, seat = view.you) {
+  const unseen = unseenCounts(view.game, seat);
   container.append('Tenpai:');
   for (const w of waits) {
     const item = document.createElement('span');
@@ -697,7 +738,7 @@ function showPreview(tileElement, preview) {
   // While choosing a riichi tile, riichi itself is the yaku: every wait wins by ron as well as
   // tsumo, so no "(tsumo only)" or "(no yaku)". Furiten still shows as it is.
   const waits = choosingRiichi ? preview.waits.map((w) => ({ ...w, ron: true, tsumo: true })) : preview.waits;
-  fillWaits(previewBox, waits, preview.furiten);
+  fillWaits(previewBox, waits, preview.furiten, preview.seat ?? view.you);
   previewBox.hidden = false;
   const rect = tileElement.getBoundingClientRect();
   const top = rect.top + window.scrollY - previewBox.offsetHeight - 6;
@@ -864,8 +905,10 @@ function renderSeat(el, player, game, you) {
   const hand = document.createElement('div');
   hand.className = 'hand';
   const clickable = (t) => canClickTile(t, player, game, you);
-  // Your tiles you could discard into tenpai show the waits that would leave on hover.
-  const preview = (t) => (player.seat === you && clickable(t) ? game.discardPreview?.[t.id] ?? null : null);
+  // Your tiles you could discard into tenpai show the waits that would leave on hover; in a
+  // replay with "Show waits", so do those of whoever is about to discard (without lifting).
+  const preview = (t) => (view.replay ? player.replayPreview?.[t.id] ?? null
+    : player.seat === you && clickable(t) ? game.discardPreview?.[t.id] ?? null : null);
   const hints = !game.noHints;
   // Tiles you can't riichi with are dimmed while you choose; so are the tiles you are passing.
   const passing = (t) => game.phase === 'exchange' && player.seat === you && (exchangePicks.has(t.id) || game.exchange.mine?.includes(t.id));
@@ -917,15 +960,20 @@ function renderSeat(el, player, game, you) {
 
   // Between your turns, show your own waits (not mid-turn, e.g. right after a chii).
   const myDiscard = game.current === you && game.phase === 'discard';
-  if (hints && player.seat === you && player.hand && !player.drawn && !won && !player.won && !myDiscard) {
+  // In a replay with "Show waits", every hand shown face up has its waits line (see replayGameView).
+  const waitsLine = view.replay ? !!player.replayWaits
+    : hints && player.seat === you && player.hand && !player.drawn && !won && !player.won && !myDiscard;
+  if (waitsLine) {
     // Each wait is shown as a tile, noting if winning on it has no yaku or only by tsumo
     // (atozuke: a hand may have a yaku on only some of its waits). Furiten belongs to the
     // whole hand, so a single "(furiten)" comes after all the waits.
     const line = document.createElement('div');
     line.className = 'waits';
     const f = game.furiten;
-    if (!game.waits.length) line.textContent = 'Not tenpai';
-    else fillWaits(line, game.waits, !!(f && (f.discard || f.temporary || f.riichi)));
+    const waits = view.replay ? player.replayWaits : game.waits;
+    const furiten = view.replay ? player.replayFuriten : !!(f && (f.discard || f.temporary || f.riichi));
+    if (!waits.length) line.textContent = 'Not tenpai';
+    else fillWaits(line, waits, furiten, player.seat);
     el.appendChild(line);
   }
 
@@ -973,6 +1021,25 @@ function contestBreakdownHtml(game, you) {
     const who = n.seat === you ? 'You' : playerName(n.seat, game);
     return `<div class="breakdown"><b>${who}</b>: Nagashi (${n.limit}): ${n.points} point${n.points === 1 ? '' : 's'}</div>`;
   }).join('');
+}
+
+// The hand's scoring (each winner's yaku, han and fu, and payment) pops up in an alert, once on
+// arriving at the result: in play when the hand ends (after the pause on a win); in a replay on
+// stepping to a hand's last step or opening a link there, but not via the Round buttons (see
+// renderReplay). Drawing the same moment again (Switch view, a setting) doesn't repeat it.
+let lastScoreAlert = null;
+let scoreAlerts = 0; // replays: each arrival at a hand's end
+function alertScores(game, you) {
+  const key = view.replay ? view.replay.scoreAlert : game.result && `${view.room.code} ${view.match.history?.length}`;
+  if (!key || key === lastScoreAlert) return;
+  lastScoreAlert = key;
+  const box = document.createElement('div');
+  box.innerHTML = breakdownHtml(game, you);
+  const text = [...box.querySelectorAll('.breakdown')].map((line) => {
+    for (const br of line.querySelectorAll('br')) br.replaceWith('\n');
+    return line.textContent.trim();
+  }).join('\n\n');
+  if (text) setTimeout(() => alert(text), 50); // after the table shows the result
 }
 
 function breakdownHtml(game, you) {
@@ -1136,7 +1203,6 @@ function render() {
   infoEl.innerHTML = `
     ${match.over ? finalHtml(match, you) : ''}
     ${(() => { const status = view.replay && !game.result ? view.replay.note : statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
-    ${breakdownHtml(game, you)}
     <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
     ${passesHtml(game)}
     <div>Wall: ${game.wallCount} tiles left</div>
@@ -1146,8 +1212,10 @@ function render() {
     ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
     <div class="room-code">Room ${room.code}</div>
   `;
+  alertScores(game, you);
   autoEl.hidden = you === null || !!view.replay;
   $('replay-nav').hidden = !view.replay;
+  $('replay-options').hidden = !view.replay;
   $('table-hint').hidden = !!view.replay;
   leaveTableBtn.textContent = view.replay ? 'Back' : 'Leave';
   for (const box of autoBoxes) box.checked = !!view.auto?.[box.dataset.auto];

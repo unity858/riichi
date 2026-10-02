@@ -87,6 +87,11 @@
         <button id="rematch" hidden>Rematch</button>
         <button id="leave-table" hidden>Leave</button>
       </div>
+      <!-- Replays only, under the Back button (see renderReplay in ui.js). -->
+      <div id="replay-options" hidden>
+        <label><input type="checkbox" id="replay-show-hands"> Show other hands</label>
+        <label><input type="checkbox" id="replay-show-waits"> Show waits</label>
+      </div>
       <!-- Auto play, per player, can be changed at any time (see autoPlay in server.js). -->
       <fieldset id="auto-settings" hidden>
         <legend>Auto</legend>
