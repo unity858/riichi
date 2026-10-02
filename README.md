@@ -21,6 +21,10 @@ Fixed rules: the dealer repeats after a win or when tenpai at an exhaustive draw
 
 During a hand, each player's Auto checklist (on the table) can ron and tsumo for them whenever it is legal, skip every pon, chii and kan offer, and discard each draw (tsumogiri, never a tile that could be a tsumo). It can be changed at any time and switches off at the start of every hand.
 
+## Tile images
+
+Tiles are drawn with SVG pictures by default; each player can switch to text tiles (`5p`) with the "Algebraic tiles" checkbox on the table. The pictures in `tiles/tileset2/` come from [riichi-mahjong-tiles-svg](https://github.com/tempai-dev/riichi-mahjong-tiles-svg), whose author offers them under the MIT license or as public domain (CC-PDDC); see [`tiles/LICENSE.md`](tiles/LICENSE.md). They were cut from the source's single-sheet panels with `tools/cut-tiles.mjs`; to regenerate them, clone that repository into this directory and run `node tools/cut-tiles.mjs`.
+
 ## Debugging options
 
 Environment variables, set before `npm start`; they can be combined:

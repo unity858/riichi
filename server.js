@@ -56,19 +56,23 @@ const SEED = (() => {
 const PORT = process.env.PORT || 8080;
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const STATIC = new Set(['/index.html', '/style.css', '/ui.js', '/game.js', '/scoring.js']);
-const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript' };
+const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
+// Tile images, cut from riichi-mahjong-tiles-svg by tools/cut-tiles.mjs. Only plain names match,
+// so nothing outside tiles/ can be reached.
+const TILE_IMAGE = /^\/tiles\/tileset2\/[a-z0-9]+\.svg$/;
 
 const server = http.createServer((req, res) => {
   // Strip the query first: room links (and reloads) are /?room=<code>.
   const pathname = req.url.split('?')[0];
   const url = pathname === '/' ? '/index.html' : pathname;
-  if (!STATIC.has(url)) {
+  const image = TILE_IMAGE.test(url);
+  if (!STATIC.has(url) && !image) {
     res.writeHead(404).end('Not found');
     return;
   }
   fs.readFile(path.join(ROOT, url), (err, data) => {
-    if (err) return res.writeHead(500).end('Error');
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(url)] });
+    if (err) return res.writeHead(image && err.code === 'ENOENT' ? 404 : 500).end(image ? 'Not found' : 'Error');
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(url)], ...(image ? { 'Cache-Control': 'max-age=86400' } : {}) });
     res.end(data);
   });
 });

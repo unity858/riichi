@@ -83,7 +83,7 @@ button.call-kan { color: #f0f; }
 .hand .drawn { margin-left: 12px; }
 .waits { font-size: 0.85em; color: #a86b00; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
 .waits .wait { display: inline-flex; align-items: center; gap: 3px; }
-.waits .tile { width: 24px; height: 32px; font-size: 11px; border-bottom-width: 3px; }
+.waits .tile { --w: 24px; --bv: 5px; font-size: 11px; border-bottom-width: 3px; }
 .waits .wait-left { color: #555; }
 .waits .furiten-tag { color: orange; font-weight: bold; }
 
@@ -93,9 +93,15 @@ button.call-kan { color: #f0f; }
   min-height: 44px;
 }
 
+/* A tile's inside (within its border) has the tile pictures' proportions, 479 x 671 (about
+   5:7), so a picture fills it exactly. Each size sets only --w, the outer width; --bv is the
+   border's total height (2px top + 5px bottom), and the 2px side borders make 4px. */
 .tile {
-  width: 34px;
-  height: 46px;
+  --w: 34px;
+  --bv: 7px;
+  --h: calc((var(--w) - 4px) * 671.173 / 479 + var(--bv));
+  width: var(--w);
+  height: var(--h);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -107,7 +113,7 @@ button.call-kan { color: #f0f; }
   font-size: 14px;
   user-select: none;
 }
-.pond .tile { width: 28px; height: 38px; font-size: 12px; }
+.pond .tile { --w: 28px; font-size: 12px; }
 
 .tile.m { color: #c62828; }
 .tile.p { color: #1565c0; }
@@ -125,10 +131,18 @@ button.call-kan { color: #f0f; }
 /* Open melds sit to the right of the hand; the called tile lies sideways. */
 .melds { display: flex; gap: 10px; margin-left: 16px; }
 .meld { display: flex; gap: 2px; align-items: flex-end; }
-.meld .tile.called { transform: rotate(90deg); margin: 0 6px; }
+.meld .tile.called { transform: rotate(90deg); margin: 0 calc((var(--h) - var(--w)) / 2); }
 #call-options { display: contents; }
 
 .tile.back { background: #e0a030; border-color: #8a5a10; }
+
+/* A tile picture covers the box; the text label under it is hidden. */
+.tile.pictured { position: relative; color: transparent; padding: 0; }
+.tile .face { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+/* The picture hides the pond's background shading, so the picture itself is darkened instead. */
+.pond .tile.tsumogiri .face { filter: brightness(0.9); }
+.pond .tile.called-away .face { filter: brightness(0.78); }
+.display-option { display: block; margin-top: 6px; font-size: 0.85em; }
 
 .tile.clickable { cursor: pointer; }
 .tile.clickable:hover { transform: translateY(-6px); }
@@ -137,7 +151,7 @@ button.call-kan { color: #f0f; }
 .tile.same-kind { outline: 3px solid #555; }
 .tile.win-tile, .tile.claim-tile { outline: 3px solid #d32f2f; }
 .tile.dimmed { opacity: 0.35; }
-.pond .tile.riichi-tile { transform: rotate(90deg); margin: 0 5px; }
+.pond .tile.riichi-tile { transform: rotate(90deg); margin: 0 calc((var(--h) - var(--w)) / 2); }
 
 .seat-name .riichi-tag { color: #1565c0; margin-left: 4px; }
 button.selected { outline: 2px solid #1565c0; }
@@ -181,7 +195,7 @@ button.selected { outline: 2px solid #1565c0; }
 }
 .dora-label { font-weight: bold; font-size: 0.9em; text-align: right; }
 .dora-row { display: flex; gap: 3px; }
-.dora-row .tile { width: 28px; height: 38px; font-size: 12px; }
+.dora-row .tile { --w: 28px; font-size: 12px; }
 
 /* Rule details under the settings, folded away until clicked. */
 .rule-details { font-size: 0.85em; margin-top: 4px; }

@@ -323,6 +323,16 @@ function clearHighlight() {
 
 // clickable discards the tile, or declares riichi with it while choosing a riichi tile.
 // preview (waits after discarding it, from the server) shows on hover.
+// Tiles are drawn as images (tiles/tileset2, see tools/cut-tiles.mjs) laid over the plain tile
+// box, or as text like "5p" when "Algebraic tiles" is ticked. The choice is kept per browser.
+let algebraic = localStorage.getItem('riichiAlgebraic') === '1';
+const HONOR_IMAGES = ['ton', 'nan', 'xia', 'pei', 'haku', 'hatsu', 'chun'];
+const SUIT_IMAGES = { m: 'man', p: 'pin', s: 'sou' };
+function tileImage(tile) {
+  const name = tile.suit === 'z' ? HONOR_IMAGES[tile.rank - 1] : `${tile.red ? 'aka' : ''}${tile.rank}${SUIT_IMAGES[tile.suit]}`;
+  return `tiles/tileset2/${name}.svg`;
+}
+
 function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {}) {
   const el = document.createElement('div');
   if (!tile) {
@@ -331,6 +341,15 @@ function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {
   }
   el.className = `tile ${tile.suit}${tile.red ? ' red' : ''} ${extraClass}`.trim();
   el.textContent = tileLabel(tile);
+  if (!algebraic) {
+    el.classList.add('pictured');
+    const img = document.createElement('img');
+    img.className = 'face';
+    img.src = tileImage(tile);
+    img.alt = tileLabel(tile);
+    img.draggable = false;
+    el.appendChild(img);
+  }
   // Hovering a face-up tile outlines every other visible copy of it (see highlightKind).
   el.dataset.kind = `${tile.rank}${tile.suit}`; // a red five is a five here
   el.addEventListener('mouseenter', () => highlightKind(el));
@@ -670,6 +689,14 @@ function render() {
 
 riichiBtn.addEventListener('click', () => {
   choosingRiichi = !choosingRiichi;
+  render();
+});
+
+const algebraicBox = $('algebraic');
+algebraicBox.checked = algebraic;
+algebraicBox.addEventListener('change', () => {
+  algebraic = algebraicBox.checked;
+  localStorage.setItem('riichiAlgebraic', algebraic ? '1' : '0');
   render();
 });
 
