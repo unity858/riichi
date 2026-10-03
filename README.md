@@ -26,16 +26,18 @@ Match settings (chosen by the host before the start):
 | Format | Standard (default), or Baiman contest: each hand deals everyone a wild tile (1A) and starts with a three-tile exchange; everyone starts on 0, a baiman or sanbaiman win scores 1 point, nobody loses points, and a hand goes on after each win until three players have won or the wall runs out (winners' hands and ura dora stay hidden until then) |
 | Length | East + South (hanchan, default), or East only (tonpuusen) |
 | Bust | on: the match ends as soon as someone is below 0 |
-| Sudden death | on: if nobody has 30,000 after the last hand, play on into the next wind until someone does |
-| Agari-yame | on: in the last hand, a dealer who repeats while in first place ends the match |
 
-Fixed rules: the dealer repeats after a win or when tenpai at an exhaustive draw; honba go up on a repeat and on every exhaustive draw, reset after a non-dealer win, and are worth 300 each to the winner; riichi sticks left at the end go to first place.
+Fixed rules: sudden death (if nobody has 30,000 after the last hand, play continues into the next wind until someone does; not in the Baiman contest) and agari-yame (in the last hand, a dealer who repeats while in first place ends the match) always apply; the dealer repeats after a win or when tenpai at an exhaustive draw; honba go up on a repeat and on every exhaustive draw, reset after a non-dealer win, and are worth 300 each to the winner; riichi sticks left at the end go to first place.
 
 During a hand, each player's Auto checklist (on the table) can ron and tsumo for them whenever it is legal, skip every pon, chii and kan offer, and discard each draw (tsumogiri, never a tile that could be a tsumo). It can be changed at any time and switches off at the start of every hand.
 
 ## Tile images
 
 Tiles are drawn with SVG pictures by default; each player can switch to text tiles (`5p`) with the "Algebraic tiles" checkbox on the table. The pictures in `tiles/tileset2/` come from [riichi-mahjong-tiles-svg](https://github.com/tempai-dev/riichi-mahjong-tiles-svg), whose author offers them under the MIT license or as public domain (CC-PDDC); see [`tiles/LICENSE.md`](tiles/LICENSE.md). The wild tile `tiles/tileset2/1a.svg` (Baiman contest) was made for this project. The others were cut from the source's single-sheet panels with `tools/cut-tiles.mjs`; to regenerate them, clone that repository into this directory and run `node tools/cut-tiles.mjs`.
+
+## Languages
+
+The main page, the room's waiting page and Recent matches have a language choice under their heading: English (the default) or 简体中文, remembered per browser. All text lives in `i18n.js`: an English table and a Chinese one, looked up by key. The Chinese entries start as placeholder numbers (10001, 10002, ... in table order), each followed by its `{placeholders}` (values filled in at runtime: numbers, names, tiles); translate by replacing each entry, keeping its placeholders. A missing Chinese entry shows the English. Server messages are sent as codes (`error.*` in the table), and the game's own names (yaku, limits, winds, honor tiles) are translated for display only: the server and recorded matches keep the English names.
 
 ## Debugging options
 

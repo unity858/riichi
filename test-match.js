@@ -8,8 +8,9 @@ const win = (winners, scores, sticks = 0) => ({ result: { type: 'ron', winners, 
 const drawHand = (tenpai, scores, sticks = 0) => ({ result: { type: 'exhaustiveDraw', tenpai, deltas: [0, 0, 0, 0] }, scores, riichiSticks: sticks });
 const even = [25000, 25000, 25000, 25000];
 
-check('settings keep only valid values', JSON.stringify(normalizeSettings({ length: 'north', bust: 'yes', extension: false, extra: 1 })) ===
-  JSON.stringify({ ...DEFAULT_SETTINGS, extension: false }));
+check('settings keep only valid values (sudden death and agari-yame are no longer settings)',
+  JSON.stringify(normalizeSettings({ length: 'north', bust: 'yes', extension: false, agariYame: false, extra: 1 })) === JSON.stringify(DEFAULT_SETTINGS) &&
+  !('extension' in DEFAULT_SETTINGS) && !('agariYame' in DEFAULT_SETTINGS));
 
 {
   const m = newMatch();
@@ -51,7 +52,7 @@ check('settings keep only valid values', JSON.stringify(normalizeSettings({ leng
   const m = newMatch({ length: 'east', extension: false });
   for (let i = 0; i < 3; i++) recordHand(m, win([(m.dealer + 1) % 4], even));
   recordHand(m, win([0], [29000, 25000, 25000, 21000]));
-  check('without extension, East 4 ends an East match regardless of 30000', m.over && m.final.reason === 'last hand');
+  check('sudden death is always on: an old "extension: false" is ignored', !m.over && handLabel(m) === 'South 1');
 }
 
 {
@@ -74,7 +75,7 @@ check('settings keep only valid values', JSON.stringify(normalizeSettings({ leng
   check('agari-yame: the last dealer repeating in first place with 30000 ends the match', m.over && m.final.reason === 'agari-yame');
   const off = setup({ agariYame: false });
   recordHand(off, win([3], [20000, 25000, 20000, 35000]));
-  check('without agari-yame the last dealer keeps dealing', !off.over && handLabel(off) === 'East 4' && off.honba === 1);
+  check('agari-yame is always on: an old "agariYame: false" is ignored', off.over && off.final.reason === 'agari-yame');
   const notTop = setup({});
   recordHand(notTop, win([3], [40000, 25000, 5000, 30000]));
   check('a last dealer repeating but not in first place keeps dealing', !notTop.over && notTop.honba === 1);

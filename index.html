@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Riichi Mahjong</title>
+  <title data-i18n="page.title">Riichi Mahjong</title>
   <!-- The site root, relative to this page: the server writes in the right one for each address
        (see PAGES in server.js), and every reference below is relative to it. -->
   <base href="./">
@@ -12,31 +12,35 @@
 <body>
   <!-- Front page: pick a name, then create a room or join one by code. -->
   <main id="lobby" class="screen" hidden>
-    <h1>Riichi Mahjong</h1>
-    <label class="field">Your name <input id="name" maxlength="20" autocomplete="nickname"></label>
+    <h1 data-i18n="lobby.heading">Riichi Mahjong</h1>
+    <!-- The language, under the heading of the main page, the room's waiting page and Recent
+         matches (see i18n.js); the language names are shown as is. -->
+    <p class="lang-picker"><label><input type="radio" name="lang-lobby" value="en"> English</label> <label><input type="radio" name="lang-lobby" value="zh"> 简体中文</label></p>
+    <label class="field"><span data-i18n="lobby.name">Your name</span> <input id="name" maxlength="20" autocomplete="nickname"></label>
     <div class="panels">
       <section class="panel">
-        <h2>Create a room</h2>
+        <h2 data-i18n="lobby.createHeading">Create a room</h2>
         <div class="settings" id="create-settings"></div>
-        <button id="create">Create room</button>
+        <button id="create" data-i18n="lobby.create">Create room</button>
       </section>
       <section class="panel">
-        <h2>Join a room</h2>
-        <label class="field">Room code <input id="join-code" maxlength="6" placeholder="e.g. 3fa9c1" autocomplete="off"></label>
-        <button id="join">Join room</button>
+        <h2 data-i18n="lobby.joinHeading">Join a room</h2>
+        <label class="field"><span data-i18n="lobby.roomCode">Room code</span> <input id="join-code" maxlength="6" placeholder="e.g. 3fa9c1" data-i18n-placeholder="lobby.roomCodePlaceholder" autocomplete="off"></label>
+        <button id="join" data-i18n="lobby.join">Join room</button>
       </section>
     </div>
     <p class="error" id="lobby-error"></p>
-    <p><button id="open-matches">Recent matches</button></p>
+    <p><button id="open-matches" data-i18n="lobby.recentMatches">Recent matches</button></p>
   </main>
 
   <!-- Recent matches: the server's recorded standard matches, newest first, with a search. -->
   <main id="matches" class="screen" hidden>
-    <h1>Recent matches</h1>
-    <p><button id="matches-back">Back</button></p>
-    <label class="field">Search <input id="matches-search" placeholder="room code or start time" autocomplete="off"></label>
+    <h1 data-i18n="matches.heading">Recent matches</h1>
+    <p class="lang-picker"><label><input type="radio" name="lang-matches" value="en"> English</label> <label><input type="radio" name="lang-matches" value="zh"> 简体中文</label></p>
+    <p><button id="matches-back" data-i18n="matches.back">Back</button></p>
+    <label class="field"><span data-i18n="matches.search">Search</span> <input id="matches-search" placeholder="room code or start time" data-i18n-placeholder="matches.searchPlaceholder" autocomplete="off"></label>
     <table id="matches-table">
-      <thead><tr><th>Start time</th><th>Room code</th></tr></thead>
+      <thead><tr><th data-i18n="matches.startTime">Start time</th><th data-i18n="matches.roomCode">Room code</th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="hint" id="matches-note"></p>
@@ -45,25 +49,26 @@
   <!-- A match's replay (replays/match?room=<code>&start=<time>) while it loads, or if it can't be
        shown; the replay itself uses the table below. -->
   <main id="replay" class="screen" hidden>
-    <h1>Match replay</h1>
-    <p><button id="replay-back">Back</button></p>
+    <h1 data-i18n="replay.heading">Match replay</h1>
+    <p><button id="replay-back" data-i18n="replay.back">Back</button></p>
     <p id="replay-which"></p>
     <p id="replay-status"></p>
   </main>
 
   <!-- Waiting room: seats fill up, the host picks settings and starts. -->
   <main id="waiting" class="screen" hidden>
-    <h1>Room <span id="room-code"></span></h1>
-    <p><button id="copy-link">Copy invite link</button> <span id="copied" hidden>Copied</span></p>
+    <h1 id="waiting-heading"></h1>
+    <p class="lang-picker"><label><input type="radio" name="lang-waiting" value="en"> English</label> <label><input type="radio" name="lang-waiting" value="zh"> 简体中文</label></p>
+    <p><button id="copy-link" data-i18n="waiting.copyLink">Copy invite link</button> <span id="copied" data-i18n="waiting.copied" hidden>Copied</span></p>
     <ol id="seat-list"></ol>
     <p id="spectator-count"></p>
     <section class="panel">
-      <h2>Settings</h2>
+      <h2 data-i18n="waiting.settings">Settings</h2>
       <div class="settings" id="room-settings"></div>
     </section>
     <p>
-      <button id="start">Start match</button>
-      <button id="leave-waiting">Leave</button>
+      <button id="start" data-i18n="waiting.start">Start match</button>
+      <button id="leave-waiting" data-i18n="waiting.leave">Leave</button>
     </p>
     <p class="hint" id="waiting-hint"></p>
   </main>
@@ -76,39 +81,39 @@
     <section id="center">
       <div id="info"></div>
       <div id="controls">
-        <button id="riichi" hidden>Riichi</button>
-        <button id="tsumo" class="win" hidden>Tsumo</button>
-        <button id="kyuushu" hidden>Abortive draw (9 terminals)</button>
-        <button id="ron" class="win" hidden>Ron</button>
+        <button id="riichi" data-i18n="table.riichi" hidden>Riichi</button>
+        <button id="tsumo" class="win" data-i18n="table.tsumo" hidden>Tsumo</button>
+        <button id="kyuushu" data-i18n="table.kyuushu" hidden>Abortive draw (9 terminals)</button>
+        <button id="ron" class="win" data-i18n="table.ron" hidden>Ron</button>
         <span id="call-options"></span>
-        <button id="pass" hidden>Skip</button>
+        <button id="pass" data-i18n="table.skip" hidden>Skip</button>
         <button id="exchange" hidden>Pass 3 tiles</button>
-        <button id="next-hand" hidden>Next hand</button>
-        <button id="rematch" hidden>Rematch</button>
+        <button id="next-hand" data-i18n="table.nextHand" hidden>Next hand</button>
+        <button id="rematch" data-i18n="table.rematch" hidden>Rematch</button>
         <button id="leave-table" hidden>Leave</button>
       </div>
       <!-- After a recorded match ends, under Rematch and Leave: a link to its replay. -->
-      <p id="replay-link" hidden><a href="./">Replay this match</a></p>
+      <p id="replay-link" hidden><a href="./" data-i18n="replay.link">Replay this match</a></p>
       <!-- Replays only, under the Back button (see renderReplay in ui.js). -->
       <div id="replay-options" hidden>
-        <label><input type="checkbox" id="replay-show-hands"> Show other hands</label>
-        <label><input type="checkbox" id="replay-show-waits"> Show waits</label>
+        <label><input type="checkbox" id="replay-show-hands"> <span data-i18n="replay.showHands">Show other hands</span></label>
+        <label><input type="checkbox" id="replay-show-waits"> <span data-i18n="replay.showWaits">Show waits</span></label>
       </div>
       <!-- Auto play, per player, can be changed at any time (see autoPlay in server.js). -->
       <fieldset id="auto-settings" hidden>
-        <legend>Auto</legend>
-        <label><input type="checkbox" data-auto="win"> Ron and tsumo when possible</label>
-        <label><input type="checkbox" data-auto="skipCalls"> Skip pon, chii and kan</label>
-        <label><input type="checkbox" data-auto="tsumogiri"> Discard each draw (tsumogiri)</label>
+        <legend data-i18n="table.auto">Auto</legend>
+        <label><input type="checkbox" data-auto="win"> <span data-i18n="table.auto.win">Ron and tsumo when possible</span></label>
+        <label><input type="checkbox" data-auto="skipCalls"> <span data-i18n="table.auto.skipCalls">Skip pon, chii and kan</span></label>
+        <label><input type="checkbox" data-auto="tsumogiri"> <span data-i18n="table.auto.tsumogiri">Discard each draw (tsumogiri)</span></label>
       </fieldset>
-      <label class="display-option"><input type="checkbox" id="algebraic"> Algebraic tiles (5p instead of pictures)</label>
-      <p class="hint" id="table-hint">Click a tile to discard. Press <kbd>Space</kbd> to discard the drawn tile.</p>
+      <label class="display-option"><input type="checkbox" id="algebraic"> <span data-i18n="table.algebraic">Algebraic tiles (5p instead of pictures)</span></label>
+      <p class="hint" id="table-hint" data-i18n="table.hint" data-i18n-html>Click a tile to discard. Press <kbd>Space</kbd> to discard the drawn tile.</p>
     </section>
     <!-- Dora indicators: revealed ones face up; ura dora flip when a riichi hand wins. -->
     <section id="dora-panel">
-      <div class="dora-label">Dora:</div>
+      <div class="dora-label" data-i18n="table.dora">Dora:</div>
       <div class="dora-row" id="dora-row"></div>
-      <div class="dora-label">Ura dora:</div>
+      <div class="dora-label" data-i18n="table.ura">Ura dora:</div>
       <div class="dora-row" id="ura-row"></div>
     </section>
     <!-- Replays only: step through the match by round (hand) or by step (a draw or an action). -->

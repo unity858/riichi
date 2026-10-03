@@ -62,7 +62,7 @@ const RECORD = !process.env.NO_RECORD || process.env.NO_RECORD === '0';
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'matches.db');
 const recorder = RECORD ? openRecorder(DB_PATH) : null;
 // index.html is served for the pages below; replay.js and seed.js run replays in the browser.
-const STATIC = new Set(['/style.css', '/ui.js', '/game.js', '/scoring.js', '/replay.js', '/seed.js']);
+const STATIC = new Set(['/style.css', '/ui.js', '/i18n.js', '/game.js', '/scoring.js', '/replay.js', '/seed.js']);
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
 // Tile images, cut from riichi-mahjong-tiles-svg by tools/cut-tiles.mjs. Only plain names match,
 // so nothing outside tiles/ can be reached.
@@ -101,7 +101,7 @@ const server = http.createServer((req, res) => {
     const params = new URLSearchParams(query);
     const match = recorder?.getMatch(params.get('room') ?? '', params.get('start') ?? '');
     res.writeHead(match ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(match ?? { error: 'There is no finished recorded match with that room and start time.' }));
+    res.end(JSON.stringify(match ?? { code: 'noMatch', error: 'There is no finished recorded match with that room and start time.' }));
     return;
   }
   // The recorded matches, for the Recent matches page: [{ id, room, startedAt, finished }], newest first.
@@ -434,7 +434,7 @@ function joinRoom(ws, room, id, name) {
     const old = room.seats[mine].ws;
     if (old && old !== ws) {
       old.room = null;
-      send(old, { type: 'error', message: 'This seat was opened in another tab.' });
+      send(old, { type: 'error', code: 'seatTaken', message: 'This seat was opened in another tab.' }); // code: see error.* in i18n.js
       old.close();
     }
     room.seats[mine].ws = ws;
@@ -487,7 +487,7 @@ function handle(ws, msg) {
     const code = String(msg.code ?? '').toLowerCase();
     const room = rooms.get(code);
     if (!id || !room) {
-      send(ws, { type: 'error', message: `There is no room ${code || '(blank)'}.` });
+      send(ws, { type: 'error', code: code ? 'noRoom' : 'noRoomBlank', params: { code }, message: `There is no room ${code || '(blank)'}.` });
       return;
     }
     joinRoom(ws, room, id, cleanName(msg.name));

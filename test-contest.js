@@ -93,9 +93,15 @@ const HATSU_4M = '23m456p789s55s666z';
 }
 
 {
-  const settings = normalizeSettings({ format: 'baiman', bust: true, extension: true });
+  const settings = normalizeSettings({ format: 'baiman', bust: true });
   check('the format is a setting, standard by default', normalizeSettings({}).format === 'standard' && settings.format === 'baiman');
-  check('going bust and sudden death are off in a Baiman contest', !settings.bust && !settings.extension);
+  check('going bust is off in a Baiman contest', !settings.bust);
+  // Nobody gets near 30,000 points in a contest, so there is no sudden death: East 4 ends it.
+  const east = newMatch({ format: 'baiman', length: 'east', contestRepeat: 'none' });
+  for (let i = 0; i < 4; i++) {
+    recordHand(east, { scores: [...east.scores], result: { type: 'contest', reason: 'wall', winners: [], wins: [], deltas: [0, 0, 0, 0], tenpai: [], nagashi: [] } });
+  }
+  check('and there is no sudden death: an East-only contest ends after East 4', east.over && east.final.reason === 'last hand');
   const m = newMatch(settings);
   check('everyone starts on 0, and hands get the contest rule',
     m.scores.join() === '0,0,0,0' && handSettings(m).rules.contest === true && handSettings(newMatch()).rules.contest === false);

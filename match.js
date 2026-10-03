@@ -5,13 +5,12 @@ import { STARTING_SCORE } from './game.js';
 
 export const WIND_NAMES = ['East', 'South', 'West', 'North'];
 
-// Room settings for a new match. Every rule here is an option; defaults follow Mahjong Soul.
+// Room settings for a new match; defaults follow Mahjong Soul. Sudden death and agari-yame are
+// not options: they always apply (sudden death in the standard format only, see recordHand).
 export const DEFAULT_SETTINGS = {
   format: 'standard', // 'standard', or 'baiman': the Baiman contest (see game.js)
   length: 'south', // 'east': East 1-4 only (tonpuusen); 'south': East 1 to South 4 (hanchan)
   bust: true, // the match ends as soon as someone is below 0 points
-  extension: true, // if nobody has TARGET_SCORE after the last hand, play on into the next wind (sudden death)
-  agariYame: true, // in the last hand, a dealer who repeats while in first place ends the match
   yakuRebalance: false, // house yaku values: see scoring.js (and nagashi in game.js)
   noHints: false, // no waits, discard previews, furiten, tsumogiri shading or ippatsu shown (see server.js)
   // Baiman contest only: 'baiman', the dealer repeats only after winning a baiman or sanbaiman
@@ -22,9 +21,9 @@ export const TARGET_SCORE = 30000;
 const LENGTHS = { east: 1, south: 2 }; // number of round winds in the regular match
 const FORMATS = ['standard', 'baiman'];
 const CONTEST_REPEATS = ['baiman', 'none'];
-// The Baiman contest starts everyone on 0 and nobody loses points, so going bust and playing
-// on to reach TARGET_SCORE don't apply; those settings are always off for it.
-const CONTEST_OFF = ['bust', 'extension'];
+// The Baiman contest starts everyone on 0 and nobody loses points, so going bust doesn't apply
+// (and neither does sudden death, see recordHand).
+const CONTEST_OFF = ['bust'];
 
 // Accepts settings from a client, keeping only known keys with valid values.
 export function normalizeSettings(input = {}) {
@@ -33,7 +32,7 @@ export function normalizeSettings(input = {}) {
     if (input.length in LENGTHS) s.length = input.length;
     if (FORMATS.includes(input.format)) s.format = input.format;
     if (CONTEST_REPEATS.includes(input.contestRepeat)) s.contestRepeat = input.contestRepeat;
-    for (const key of ['bust', 'extension', 'agariYame', 'yakuRebalance', 'noHints']) if (typeof input[key] === 'boolean') s[key] = input[key];
+    for (const key of ['bust', 'yakuRebalance', 'noHints']) if (typeof input[key] === 'boolean') s[key] = input[key];
   }
   if (s.format === 'baiman') for (const key of CONTEST_OFF) s[key] = false;
   return s;
@@ -82,7 +81,7 @@ export function ranking(match) {
 //   - Honba go up by one on a dealer repeat and on every exhaustive draw (even when the
 //     dealer was noten and the deal passes), and reset to 0 when a non-dealer wins.
 //   - The match ends when someone is below 0 (bust), or at the end of the last hand: after
-//     the last regular hand, unless nobody has TARGET_SCORE and extension is on, in which
+//     the last regular hand, unless nobody has TARGET_SCORE (sudden death, standard format only), in which
 //     case it goes on into the next wind until someone has TARGET_SCORE (or that wind ends).
 //     A dealer repeat in the last hand continues the match, unless agari-yame applies.
 export function recordHand(match, state) {
@@ -106,6 +105,9 @@ export function recordHand(match, state) {
   }
 
   const regularWinds = LENGTHS[settings.length];
+  // Sudden death (playing on into the next wind until someone has TARGET_SCORE) always applies,
+  // except in the Baiman contest, where nobody gets near it. So does agari-yame.
+  const extension = settings.format !== 'baiman';
   const lastRegular = match.roundWind === regularWinds - 1 && match.hand === 3;
   const inExtension = match.roundWind >= regularWinds;
   const someoneReached = match.scores.some((s) => s >= TARGET_SCORE);
@@ -116,15 +118,15 @@ export function recordHand(match, state) {
 
   if (dealerRepeats) {
     // A repeat keeps the dealer, except in the last hand when agari-yame ends the match: the
-    // dealer must be in first place (and, with extension on, have TARGET_SCORE).
+    // dealer must be in first place (and, with sudden death, have TARGET_SCORE).
     const last = lastRegular || inExtension;
-    const reached = !settings.extension || match.scores[match.dealer] >= TARGET_SCORE;
-    if (last && settings.agariYame && dealerTop && reached) return finish(match, 'agari-yame');
+    const reached = !extension || match.scores[match.dealer] >= TARGET_SCORE;
+    if (last && dealerTop && reached) return finish(match, 'agari-yame');
     if (inExtension && someoneReached && dealerTop) return finish(match, 'target reached');
     return match;
   }
 
-  if (lastRegular && (!settings.extension || someoneReached)) return finish(match, 'last hand');
+  if (lastRegular && (!extension || someoneReached)) return finish(match, 'last hand');
   if (inExtension && someoneReached) return finish(match, 'target reached');
   match.dealer = (match.dealer + 1) % 4;
   match.hand++;

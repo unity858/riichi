@@ -2,10 +2,55 @@
 // Three screens: the lobby (name, create or join a room), the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
-import { tileLabel, tileIndex, isWild, calledTilePosition, WINDS, waitYaku, furitenStatus, discardPreview } from './game.js';
+import { tileLabel, tileIndex, isWild, calledTilePosition, waitYaku, furitenStatus, discardPreview } from './game.js';
 import { replaySteps } from './replay.js';
+import { t, getLang, setLang, has } from './i18n.js';
 
 const $ = (id) => document.getElementById(id);
+
+// --- Language (see i18n.js) ---
+// Static text is marked in index.html (data-i18n, data-i18n-placeholder; data-i18n-html for text
+// with markup). Text set with setText keeps its key too, so a language change redoes all of it;
+// everything else is drawn again (see refreshLanguage).
+function applyStatic() {
+  document.documentElement.lang = getLang() === 'zh' ? 'zh-Hans' : 'en';
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    const text = t(el.dataset.i18n, el.dataset.i18nParams ? JSON.parse(el.dataset.i18nParams) : {});
+    if (el.hasAttribute('data-i18n-html')) el.innerHTML = text;
+    else el.textContent = text;
+  }
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) el.placeholder = t(el.dataset.i18nPlaceholder);
+  for (const input of document.querySelectorAll('.lang-picker input')) input.checked = input.value === getLang();
+}
+// Sets an element's text from the table (no key: empty), remembering the key and params.
+function setText(el, key, params) {
+  if (!key) {
+    delete el.dataset.i18n;
+    delete el.dataset.i18nParams;
+    el.textContent = '';
+    return;
+  }
+  el.dataset.i18n = key;
+  if (params) el.dataset.i18nParams = JSON.stringify(params);
+  else delete el.dataset.i18nParams;
+  el.textContent = t(key, params);
+}
+// Game names shown in the current language. Number tiles, red fives and the wild tile stay as
+// they are; honor tiles, rounds ("East 1", as recorded), yaku and limits are translated.
+const tileText = (tile) => (tile.suit === 'z' ? t(`honor.${tile.rank}`) : tileLabel(tile));
+const ROUND_WINDS = ['East', 'South', 'West', 'North'];
+function roundLabel(label) {
+  const m = /^(East|South|West|North) (\d+)$/.exec(label ?? '');
+  return m ? t('round.label', { wind: t(`roundWind.${ROUND_WINDS.indexOf(m[1])}`), n: m[2] }) : label;
+}
+const yakuName = (name) => (has(`yaku.${name}`) ? t(`yaku.${name}`) : name);
+function limitName(limit) {
+  if (has(`limit.${limit}`)) return t(`limit.${limit}`);
+  const m = /^(\d+)x yakuman$/.exec(limit ?? '');
+  return m ? t('score.yakumanTimes', { n: m[1] }) : limit;
+}
+// "A and B (and C)", or "A, B, C": joined with the table's join.and or join.comma.
+const joinWith = (key, items) => items.reduce((a, b) => t(key, { a, b }));
 const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table'), matches: $('matches'), replay: $('replay') };
 const infoEl = $('info');
 const nextHandBtn = $('next-hand');
@@ -60,7 +105,7 @@ const playerId = sessionStorage.getItem('riichiId') ?? crypto.randomUUID();
 sessionStorage.setItem('riichiId', playerId);
 $('name').value = localStorage.getItem('riichiName') ?? '';
 const myName = () => {
-  const name = $('name').value.trim() || 'Player';
+  const name = $('name').value.trim() || t('player.default');
   localStorage.setItem('riichiName', name);
   return name;
 };
@@ -83,7 +128,7 @@ let joinedCode = null;
 // a match the seat is kept, so Forward (or the link) takes it back.
 function showRoute() {
   const page = route();
-  $('lobby-error').textContent = '';
+  setText($('lobby-error'), null);
   if (page !== 'replays/match' && view?.replay) view = null; // a replay's table is only on its page
   if (page !== 'game' && joinedCode) send({ type: 'leave' });
   if (page === 'game') {
@@ -120,7 +165,9 @@ ws.addEventListener('message', (e) => {
     if (route() === 'game') navigate('./');
   } else if (msg.type === 'error') {
     if (!view && route() === 'game') navigate('./', { replace: true });
-    $('lobby-error').textContent = msg.message;
+    // Server messages come as a code (error.<code> in the table) with their values.
+    if (msg.code) setText($('lobby-error'), `error.${msg.code}`, msg.params);
+    else $('lobby-error').textContent = msg.message;
   } else if (msg.type === 'state') {
     if (route() === 'game') showState(msg); // not after leaving with Back
   }
@@ -168,7 +215,7 @@ function heldView(before, after) {
   };
 }
 ws.addEventListener('close', () => {
-  document.body.insertAdjacentHTML('afterbegin', '<p class="banner">Disconnected from the server. Reload the page to reconnect.</p>');
+  document.body.insertAdjacentHTML('afterbegin', `<p class="banner" data-i18n="page.disconnected">${t('page.disconnected')}</p>`);
 });
 
 function send(msg) {
@@ -181,105 +228,33 @@ function showScreen(name) {
 
 // --- Settings ---
 
+// Labels are keys in i18n.js.
 const SETTING_FIELDS = [
-  { key: 'format', label: 'Format', radios: [['standard', 'Standard'], ['baiman', 'Baiman contest']] },
-  { key: 'length', label: 'Length', radios: [['east', 'East only (tonpuusen)'], ['south', 'East + South (hanchan)']] },
+  { key: 'format', label: 'settings.format', radios: [['standard', 'settings.format.standard'], ['baiman', 'settings.format.baiman']] },
+  { key: 'length', label: 'settings.length', radios: [['east', 'settings.length.east'], ['south', 'settings.length.south']] },
   // standardOnly: hidden for the Baiman contest, where they are always off (see match.js).
-  { key: 'bust', label: 'End the match when someone goes below 0', standardOnly: true },
-  { key: 'extension', label: 'Sudden death: if nobody has 30,000 at the end, play on into the next wind', standardOnly: true },
-  { key: 'agariYame', label: 'Agari-yame: a last-hand dealer in first place may end the match' },
-  { key: 'yakuRebalance', label: 'Yaku rebalance (house rules)' },
-  { key: 'noHints', label: 'No hints: no waits, tile highlighting or ippatsu shown' },
+  { key: 'bust', label: 'settings.bust', standardOnly: true },
+  { key: 'yakuRebalance', label: 'settings.yakuRebalance' },
+  { key: 'noHints', label: 'settings.noHints' },
   // contestOnly: shown only for the Baiman contest.
-  { key: 'contestRepeat', label: 'Dealer repeats (honba)', contestOnly: true,
-    radios: [['baiman', 'Only when the dealer wins a baiman or sanbaiman'], ['none', 'Never']] },
+  { key: 'contestRepeat', label: 'settings.contestRepeat', contestOnly: true,
+    radios: [['baiman', 'settings.contestRepeat.baiman'], ['none', 'settings.contestRepeat.none']] },
 ];
-const DEFAULT_SETTINGS = { format: 'standard', length: 'south', bust: true, extension: true, agariYame: true, yakuRebalance: false, noHints: false, contestRepeat: 'baiman' };
+const DEFAULT_SETTINGS = { format: 'standard', length: 'south', bust: true, yakuRebalance: false, noHints: false, contestRepeat: 'baiman' };
 
 // The rule details shown under the settings, folded away until clicked.
-const RULE_DETAILS = `
-  <p><b>Length.</b> East only: East 1 to East 4. East + South: East 1 to South 4. The dealer
-  repeats after winning or being tenpai at an exhaustive draw (or an abortive draw), so a
-  round can have more hands than this.</p>
-  <p><b>Bust.</b> The match ends as soon as anyone's score is below 0.</p>
-  <p><b>Sudden death.</b> If nobody has 30,000 when the last hand ends, play continues into the
-  next wind (South for an East-only match, West for East + South) and ends as soon as someone
-  has 30,000 after a hand, or when that wind is over.</p>
-  <p><b>Agari-yame.</b> In the last hand, if the dealer repeats while in first place (and, with
-  sudden death on, with at least 30,000), the match ends instead of continuing.</p>
-  <p><b>Yaku rebalance.</b> House values for a few yaku:</p>
-  <table>
-    <tr><th>Yaku</th><th>Standard</th><th>Rebalanced</th></tr>
-    <tr><td>Nagashi</td><td>mangan</td><td>baiman (still combines with nothing)</td></tr>
-    <tr><td>Sankantsu (three kans)</td><td>2 han</td><td>yakuman</td></tr>
-    <tr><td>Suukantsu (four kans)</td><td>yakuman</td><td>double yakuman</td></tr>
-    <tr><td>Sanshoku doukou</td><td>2 han</td><td>3 han</td></tr>
-    <tr><td>Ryanpeikou</td><td>3 han</td><td>6 han (iipeikou is still 1)</td></tr>
-    <tr><td>Renhou: a ron before your first draw, with no calls before it (not the dealer)</td><td>(none)</td>
-      <td>8 han (baiman), counting no other yaku or dora; if the hand is worth more without it, that score is used</td></tr>
-    <tr><td>Shoutate: triplets of one number in two suits and a pair of it in the third</td><td>(none)</td><td>2 han</td></tr>
-  </table>
-  <p><b>No hints.</b> Hides everything that only helps: your waits and the tiles left (under your
-  hand and on hovering a discard), furiten, the outline on other copies of a hovered tile, the
-  outline on your drawn tile and on a discard you can call, the shading of tsumogiri discards,
-  the dimming of tiles you can't riichi with, and ippatsu. Discards that were called stay dark
-  gray, "Riichi" and "Double riichi" still show, and the Riichi, Tsumo, Ron and call buttons
-  still appear when those are possible.</p>
-  <p><b>Always on.</b> Honba go up on a dealer repeat and on every draw, reset after a
-  non-dealer win, and add 300 each to a win. Riichi sticks left at the end go to first place.
-  Open tanyao, double ron, and Mahjong Soul's double yakuman (13-sided kokushi, 9-sided
-  chuuren, suuankou tanki, daisuushi) are on. A win needs at least one yaku.</p>
-  <p><b>Baiman contest.</b> See its "Detailed rules" next to the format.</p>`;
+const ruleDetailsHtml = () => {
+  const p = (key) => `<p>${t(key)}</p>`;
+  const row = (key) => `<tr><td>${t(key)}</td><td>${t(`${key}.standard`)}</td><td>${t(`${key}.rebalanced`)}</td></tr>`;
+  return [p('rules.length'), p('rules.bust'), p('rules.extension'), p('rules.agariYame'), p('rules.rebalance'),
+    `<table><tr><th>${t('rules.table.yaku')}</th><th>${t('rules.table.standard')}</th><th>${t('rules.table.rebalanced')}</th></tr>`,
+    ...['nagashi', 'sankantsu', 'suukantsu', 'doukou', 'ryanpeikou', 'renhou', 'shoutate'].map((k) => row(`rules.table.${k}`)),
+    '</table>', p('rules.noHints'), p('rules.alwaysOn'), p('rules.contestPointer')].join('');
+};
 
 // The Baiman contest's rules, folded away next to the format choice.
-const CONTEST_RULES = `
-  <p><b>Points.</b> Everyone starts on 0. A win worth a baiman (8-10 han) or sanbaiman (11-12
-  han) scores 1 point, counted as soon as it is won; any other win scores 0. Fu don't matter
-  and aren't shown. Nobody ever loses points: not for dealing in, not when someone else wins
-  by tsumo, and riichi is free (no 1,000-point stick, so you can riichi on 0). There are no
-  noten payments and honba add nothing.</p>
-  <p><b>The wild tile.</b> Every hand deals each player one wild tile (1A) as their 13th tile,
-  on top of the usual 136. It can never be discarded, and it is only used for winning: a hand
-  wins (by ron or tsumo) if the wild tile can stand for some tile that completes it. It can be
-  any of the 34 kinds, but never a red five, even a kind whose four copies are all elsewhere.
-  The win is always scored as whichever kind gives the most han, and that kind counts for dora
-  (so an extra dora can push a hand past sanbaiman). Your waits are every tile that wins for
-  some value of the wild tile. A hand whose other tiles are already complete sets wins on any
-  tile, and six different pairs win on any of the 28 other kinds (seven pairs must be distinct);
-  either way the waits are shown as the wild tile alone. Since such a hand waits on nearly
-  everything, it is almost always furiten and has to win by tsumo. Riichi, pon, chii and kan use
-  your other tiles as usual.</p>
-  <p><b>The tile exchange.</b> Each hand starts, before the dealer's first draw, with every player
-  choosing exactly three tiles to pass (never the wild tile): click them, then "Pass 3 tiles".
-  Once all four have chosen, each player's three tiles go to a randomly chosen other player
-  (a random derangement: nobody gets their own back). Who passed to whom is then shown under
-  the round, e.g. "Tile passes: E -> S, S -> W, W -> N, N -> E", for the rest of the hand.
-  Then play starts as usual. It makes rare hands, flushes in particular, easier to build.</p>
-  <p><b>Up to three winners.</b> A win doesn't end the hand. The winner sits out the rest of it:
-  play skips them, and they can't win again, call, or be dealt into. Several players can ron
-  the same tile, which stays in the discarder's pond. The hand ends when three players have
-  won, when the wall runs out, on a yakuman, or on kyuushu kyuuhai or suufon renda (the only
-  abortive draws). Any ron or tsumo before the fourth wind rules out suufon renda.</p>
-  <p><b>What stays hidden.</b> A winner's hand stays hidden until the hand ends, with their
-  Ron or Tsumo shown above their name. Their han are shown to everyone under "Baiman contest"
-  straight away. The ura dora count for riichi winners as usual, but during the hand only a
-  player who has won in riichi can see them. Everything is shown when the hand ends.</p>
-  <p><b>A ron interrupts like a call.</b> It ends every riichi player's ippatsu and the
-  uninterrupted first go-around (so no double riichi, chiihou, renhou or kyuushu kyuuhai after
-  it), and the discarder loses nagashi. A tsumo by another player doesn't.</p>
-  <p><b>Robbing a kan.</b> As usual, any winning hand can rob an added kan (chankan), and only
-  kokushi can rob a closed kan. After a robbed added kan the kan player plays on, as if they had
-  discarded the tile; kokushi is a yakuman, so it ends the hand and the match.</p>
-  <p><b>Nagashi.</b> At the end of the wall, a player who hasn't won and whose discards
-  are all terminals and honors, none of them called or ronned, scores it like a win: a mangan
-  (0 points), or a baiman (1 point) with the yaku rebalance.</p>
-  <p><b>Yakuman.</b> Any yakuman, including a kazoe yakuman (13+ han), ends the hand and the
-  match at once. It scores 0 points; the match is ranked by points as usual.</p>
-  <p><b>The match.</b> Dealer repeats follow the "Dealer repeats (honba)" setting: either the
-  dealer repeats only after winning a baiman or sanbaiman (a win worth a point), or the deal
-  always passes. Draws and abortive draws never repeat the dealer. Honba count the dealer's
-  repeats in a row and are worth nothing. Going bust and sudden death don't apply; length and
-  agari-yame do.</p>`;
+const contestRulesHtml = () => ['points', 'wild', 'exchange', 'winners', 'hidden', 'ron', 'chankan', 'nagashi', 'yakuman', 'match']
+  .map((k) => `<p>${t(`contestRules.${k}`)}</p>`).join('');
 
 // Fills container with the settings; editable ones call onChange with the new settings.
 function renderSettings(container, settings, editable, onChange) {
@@ -291,7 +266,7 @@ function renderSettings(container, settings, editable, onChange) {
       // Exactly one choice, as radio buttons.
       const row = document.createElement('div');
       row.className = 'setting setting-radios';
-      row.append(`${field.label}: `);
+      row.append(`${t(field.label)}: `);
       for (const [value, text] of field.radios) {
         const label = document.createElement('label');
         const input = document.createElement('input');
@@ -300,7 +275,7 @@ function renderSettings(container, settings, editable, onChange) {
         input.checked = settings[field.key] === value;
         input.disabled = !editable;
         input.addEventListener('change', () => onChange({ ...settings, [field.key]: value }));
-        label.append(input, ` ${text}`);
+        label.append(input, ` ${t(text)}`);
         row.appendChild(label);
         if (field.key === 'format' && value === 'baiman') row.appendChild(contestRulesToggle(container));
       }
@@ -308,7 +283,7 @@ function renderSettings(container, settings, editable, onChange) {
       if (field.key === 'format' && detailsOpen[`${container.id}-contest`]) {
         const rules = document.createElement('div');
         rules.className = 'rule-details contest-rules';
-        rules.innerHTML = CONTEST_RULES;
+        rules.innerHTML = contestRulesHtml();
         container.appendChild(rules);
       }
       continue;
@@ -319,7 +294,7 @@ function renderSettings(container, settings, editable, onChange) {
     const input = document.createElement('input');
     input.type = 'checkbox';
     input.checked = settings[field.key];
-    row.append(input, ` ${field.label}`);
+    row.append(input, ` ${t(field.label)}`);
     input.disabled = !editable;
     input.addEventListener('change', () => onChange({ ...settings, [field.key]: input.checked }));
     container.appendChild(row);
@@ -327,7 +302,7 @@ function renderSettings(container, settings, editable, onChange) {
   // The settings are redrawn on every update, so remember whether the details were open.
   const details = document.createElement('details');
   details.className = 'rule-details';
-  details.innerHTML = `<summary>Click for details</summary>${RULE_DETAILS}`;
+  details.innerHTML = `<summary>${t('settings.ruleDetails')}</summary>${ruleDetailsHtml()}`;
   details.open = !!detailsOpen[container.id];
   details.addEventListener('toggle', () => (detailsOpen[container.id] = details.open));
   container.appendChild(details);
@@ -342,7 +317,7 @@ function contestRulesToggle(container) {
   toggle.className = 'rules-toggle';
   toggle.setAttribute('role', 'button');
   toggle.tabIndex = 0;
-  toggle.textContent = `${detailsOpen[key] ? '▾' : '▸'} Detailed rules`;
+  toggle.textContent = `${detailsOpen[key] ? '▾' : '▸'} ${t('settings.detailedRules')}`;
   const flip = () => {
     detailsOpen[key] = !detailsOpen[key];
     if (container.id === 'create-settings') drawCreateSettings();
@@ -370,7 +345,8 @@ drawCreateSettings();
 // in the room code or in the start time as shown, in this browser's own time zone.
 const MATCHES_SHOWN = 10;
 let recentMatches = [];
-const startTime = (iso) => new Date(iso).toLocaleString();
+// A start time in this browser's time zone (as given, if it isn't a time: say a mistyped link).
+const startTime = (iso) => (Number.isNaN(Date.parse(iso)) ? iso : new Date(iso).toLocaleString());
 function renderMatches() {
   const q = $('matches-search').value.trim().toLowerCase();
   const found = recentMatches.filter((m) => !q || m.room.toLowerCase().includes(q) || startTime(m.startedAt).toLowerCase().includes(q));
@@ -382,7 +358,7 @@ function renderMatches() {
     const row = body.insertRow();
     if (!m.finished) {
       row.insertCell().textContent = startTime(m.startedAt);
-      row.insertCell().textContent = `${m.room} (in progress)`;
+      row.insertCell().textContent = t('matches.inProgress', { room: m.room });
       continue;
     }
     const address = `replays/match?${new URLSearchParams({ room: m.room, start: m.startedAt })}`;
@@ -399,19 +375,23 @@ function renderMatches() {
     }
   }
   const more = found.length - MATCHES_SHOWN;
-  $('matches-note').textContent = !recentMatches.length ? 'No matches recorded yet.'
-    : !found.length ? 'No matches found.' : more > 0 ? `${more} more not shown: search to narrow them down.` : '';
+  if (!matchesRecording) setText($('matches-note'), 'matches.notRecording');
+  else if (!recentMatches.length) setText($('matches-note'), 'matches.none');
+  else if (!found.length) setText($('matches-note'), 'matches.notFound');
+  else if (more > 0) setText($('matches-note'), 'matches.more', { n: more });
+  else setText($('matches-note'), null);
 }
+let matchesRecording = true;
 async function openMatches() {
   showScreen('matches');
-  $('matches-note').textContent = 'Loading…';
+  setText($('matches-note'), 'matches.loading');
   try {
     const data = await (await fetch(new URL('api/matches', ROOT))).json();
     recentMatches = data.matches;
+    matchesRecording = data.recording;
     renderMatches();
-    if (!data.recording) $('matches-note').textContent = 'This server is not recording matches.';
   } catch {
-    $('matches-note').textContent = 'Could not load the matches.';
+    setText($('matches-note'), 'matches.loadFailed');
   }
 }
 $('open-matches').addEventListener('click', () => navigate('replays'));
@@ -450,8 +430,9 @@ async function showReplay() {
   if (replayMatch?.key !== key) {
     replayMatch = null;
     replayPov = 0;
-    $('replay-which').textContent = room && start ? `Room ${room}, started ${startTime(start)}` : '';
-    $('replay-status').textContent = room && start ? 'Loading…' : 'No match given.';
+    if (room && start) setText($('replay-which'), 'replay.which', { room, time: startTime(start) });
+    else setText($('replay-which'), null);
+    setText($('replay-status'), room && start ? 'replay.loading' : 'replay.noMatch');
     showScreen('replay');
     if (!room || !start) return;
     let data;
@@ -459,11 +440,12 @@ async function showReplay() {
       const res = await fetch(new URL(`api/match?${new URLSearchParams({ room, start })}`, ROOT));
       data = await res.json();
       if (!res.ok) {
-        $('replay-status').textContent = data.error;
+        if (data.code) setText($('replay-status'), `error.${data.code}`);
+        else $('replay-status').textContent = data.error;
         return;
       }
     } catch {
-      $('replay-status').textContent = 'Could not load the match.';
+      setText($('replay-status'), 'replay.loadFailed');
       return;
     }
     if (route() !== 'replays/match' || query('room') !== room || query('start') !== start) return; // moved on meanwhile
@@ -500,7 +482,7 @@ function renderReplay({ arrived = false } = {}) {
     s = replaySteps(h, h.actions, step).state;
   } catch (err) {
     view = null;
-    $('replay-status').textContent = `This hand can't be replayed with the current rules (${err.message}).`;
+    setText($('replay-status'), 'replay.cantReplay', { error: err.message });
     showScreen('replay');
     return;
   }
@@ -512,15 +494,16 @@ function renderReplay({ arrived = false } = {}) {
     },
     you: replayPov,
     auto: null,
-    room: { code: m.room, started: true, hostSeat: 0, settings: m.settings, seats: m.players.map((name, i) => ({ name: name ?? `Player ${i + 1}`, connected: true })) },
+    room: { code: m.room, started: true, hostSeat: 0, settings: m.settings, seats: m.players.map((name, i) => ({ name: name ?? t('player.numbered', { n: i + 1 }), connected: true })) },
     match: { label: h.label, honba: h.honba, over: last, final: m.final },
     game: replayGameView(s),
   };
   // The address follows, without a history entry per turn.
   const address = `replays/match?${new URLSearchParams({ room: m.room, start: m.startedAt, hand: replayPos.hand + 1, step })}`;
   history.replaceState(null, '', new URL(address, ROOT));
-  $('round-label').textContent = `Round: ${h.label}${h.honba ? ` · ${h.honba} honba` : ''}`;
-  $('step-label').textContent = `Step: ${step} / ${lastStep(replayPos.hand)}`;
+  const round = h.honba ? t('info.honba', { label: roundLabel(h.label), n: h.honba }) : roundLabel(h.label);
+  $('round-label').textContent = t('replay.round', { label: round });
+  $('step-label').textContent = t('replay.step', { step, last: lastStep(replayPos.hand) });
   $('round-prev').disabled = replayPos.hand === 0 && step === 0;
   $('round-next').disabled = replayPos.hand === m.hands.length - 1;
   $('step-prev').disabled = replayPos.hand === 0 && step === 0;
@@ -569,21 +552,24 @@ function replayGameView(s) {
 // A step in words, e.g. "S (Bob) draws 5m" or "S (Bob) pons 5m from E (Alice)". Names come from
 // the match record (escaped: they go into HTML). The end step shows the result instead.
 function describeStep(step, h, players) {
-  const who = (seat) => `${seatWind(seat, h.dealer)} (${escapeHtml(players[seat] ?? `Player ${seat + 1}`)})`;
-  const tile = (code) => tileLabel({ suit: code.slice(-1), rank: code[0] === '0' ? 5 : Number(code[0]), red: code[0] === '0' });
-  if (step.type === 'start') return `${h.label}: dealt, the dealer ${who(h.dealer)} has drawn`;
-  if (step.type === 'draw') return `${who(step.seat)} draws ${tile(step.tile)}`;
+  const who = (seat) => t('name.player', { wind: seatWind(seat, h.dealer), name: escapeHtml(players[seat] ?? t('player.numbered', { n: seat + 1 })) });
+  const tile = (code) => tileText({ suit: code.slice(-1), rank: code[0] === '0' ? 5 : Number(code[0]), red: code[0] === '0' });
+  if (step.type === 'start') return t('step.start', { label: roundLabel(h.label), who: who(h.dealer) });
+  if (step.type === 'draw') return t('step.draw', { who: who(step.seat), tile: tile(step.tile) });
   if (step.type === 'end') return '';
   const a = step.action;
   switch (a.type) {
-    case 'discard': return `${who(a.seat)} ${a.riichi ? 'declares riichi, discarding' : 'discards'} ${tile(a.tile)}${a.tsumogiri ? ' (tsumogiri)' : ''}`;
+    case 'discard': {
+      const key = `step.${a.riichi ? 'riichi' : 'discard'}${a.tsumogiri ? 'Tsumogiri' : ''}`;
+      return t(key, { who: who(a.seat), tile: tile(a.tile) });
+    }
     case 'chii': case 'pon': case 'kan':
-      return `${who(a.seat)} ${a.type === 'kan' ? 'kans' : `${a.type}s`} ${tile(a.tile)} from ${who(a.from)}`;
-    case 'ankan': return `${who(a.seat)} declares a closed kan of ${tile(a.tiles[0])}`;
-    case 'kakan': return `${who(a.seat)} adds ${tile(a.tile)} to a pon`;
-    case 'ron': return `${a.seats.map(who).join(' and ')} ron on ${tile(a.tile)} from ${who(a.from)}`;
-    case 'tsumo': return `${who(a.seat)} wins by tsumo on ${tile(a.tile)}`;
-    case 'kyuushu': return `${who(a.seat)} declares kyuushu kyuuhai`;
+      return t(`step.${a.type}`, { who: who(a.seat), tile: tile(a.tile), from: who(a.from) });
+    case 'ankan': return t('step.ankan', { who: who(a.seat), tile: tile(a.tiles[0]) });
+    case 'kakan': return t('step.kakan', { who: who(a.seat), tile: tile(a.tile) });
+    case 'ron': return t('step.ron', { who: joinWith('join.and', a.seats.map(who)), tile: tile(a.tile), from: who(a.from) });
+    case 'tsumo': return t('step.tsumo', { who: who(a.seat), tile: tile(a.tile) });
+    case 'kyuushu': return t('step.kyuushu', { who: who(a.seat) });
     default: return '';
   }
 }
@@ -639,7 +625,7 @@ $('create').addEventListener('click', () => send({ type: 'create', id: playerId,
 $('join').addEventListener('click', () => {
   const code = $('join-code').value.trim().toLowerCase();
   if (!/^[0-9a-f]{6}$/.test(code)) {
-    $('lobby-error').textContent = 'A room code is 6 characters, 0-9 and a-f.';
+    setText($('lobby-error'), 'lobby.badCode');
     return;
   }
   send({ type: 'join', code, id: playerId, name: myName() });
@@ -661,24 +647,25 @@ $('leave-table').addEventListener('click', () => (view?.replay ? navigate('repla
 
 function renderWaiting() {
   const { room, you } = view;
-  $('room-code').textContent = room.code;
+  $('waiting-heading').textContent = t('waiting.heading', { code: room.code });
   const list = $('seat-list');
   list.innerHTML = '';
   room.seats.forEach((p, i) => {
     const li = document.createElement('li');
-    li.textContent = p ? `${p.name}${i === you ? ' (you)' : ''}${i === room.hostSeat ? ' · host' : ''}${p.connected ? '' : ' · offline'}` : 'Empty seat';
+    let text = p ? (i === you ? t('waiting.you', { name: p.name }) : p.name) : t('waiting.empty');
+    if (p && i === room.hostSeat) text = t('waiting.host', { seat: text });
+    if (p && !p.connected) text = t('waiting.offline', { seat: text });
+    li.textContent = text;
     li.className = p ? '' : 'empty';
     list.appendChild(li);
   });
-  $('spectator-count').textContent = room.spectators ? `${room.spectators} watching` : '';
+  $('spectator-count').textContent = room.spectators ? t('waiting.watching', { n: room.spectators }) : '';
   const isHost = you !== null && you === room.hostSeat;
   renderSettings($('room-settings'), room.settings, isHost, (s) => send({ type: 'settings', settings: s }));
   const full = room.seats.every(Boolean);
   $('start').hidden = !isHost;
   $('start').disabled = !full;
-  $('waiting-hint').textContent = you === null ? 'The room is full: you are watching.'
-    : isHost ? (full ? 'Everyone is here.' : 'Share the invite link; the match can start once all four seats are taken.')
-      : 'Waiting for the host to start the match.';
+  $('waiting-hint').textContent = t(you === null ? 'waiting.full' : isHost ? (full ? 'waiting.everyone' : 'waiting.share') : 'waiting.waitHost');
 }
 
 // Fills a waits display: each wait as a tile, noting if winning on it has no yaku or only by
@@ -709,7 +696,7 @@ function unseenCounts(game, you) {
 // watches, from the hands shown face up), then any note about yaku.
 function fillWaits(container, waits, furiten, seat = view.you) {
   const unseen = unseenCounts(view.game, seat);
-  container.append('Tenpai:');
+  container.append(t('waits.tenpai'));
   for (const w of waits) {
     const item = document.createElement('span');
     item.className = 'wait';
@@ -719,16 +706,16 @@ function fillWaits(container, waits, furiten, seat = view.you) {
       const left = document.createElement('span');
       left.className = 'wait-left';
       left.textContent = `×${unseen[w.kind]}`;
-      left.title = `${unseen[w.kind]} not visible to you`;
+      left.title = t('waits.unseen', { n: unseen[w.kind] });
       item.appendChild(left);
     }
-    if (!w.ron) item.append(w.tsumo ? '(tsumo only)' : '(no yaku)');
+    if (!w.ron) item.append(t(w.tsumo ? 'waits.tsumoOnly' : 'waits.noYaku'));
     container.appendChild(item);
   }
   if (furiten) {
     const tag = document.createElement('span');
     tag.className = 'furiten-tag';
-    tag.textContent = '(furiten)';
+    tag.textContent = t('waits.furiten');
     container.appendChild(tag);
   }
 }
@@ -785,13 +772,13 @@ function tileEl(tile, { clickable = false, extraClass = '', preview = null } = {
     return el;
   }
   el.className = `tile ${tile.suit}${tile.red ? ' red' : ''} ${extraClass}`.trim();
-  el.textContent = tileLabel(tile);
+  el.textContent = tileText(tile);
   if (!algebraic) {
     el.classList.add('pictured');
     const img = document.createElement('img');
     img.className = 'face';
     img.src = tileImage(tile);
-    img.alt = tileLabel(tile);
+    img.alt = tileText(tile);
     img.draggable = false;
     el.appendChild(img);
   }
@@ -842,18 +829,18 @@ function tileOfKind(kind) {
 }
 
 function seatWind(seat, dealer) {
-  return WINDS[(seat - dealer + 4) % 4];
+  return t(`wind.${(seat - dealer + 4) % 4}`);
 }
 
 // Names are chosen by players, so they are escaped before going into any HTML.
 const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-const nameOf = (seat) => escapeHtml(view.room.seats[seat]?.name ?? `Player ${seat + 1}`);
+const nameOf = (seat) => escapeHtml(view.room.seats[seat]?.name ?? t('player.numbered', { n: seat + 1 }));
 
 function playerName(seat, game) {
-  return `${seatWind(seat, game.dealer)} (${nameOf(seat)})`;
+  return t('name.player', { wind: seatWind(seat, game.dealer), name: nameOf(seat) });
 }
-
-const CALLOUT_LABELS = { chii: 'Chii', pon: 'Pon', kan: 'Kan', riichi: 'Riichi', ron: 'Ron', tsumo: 'Tsumo' };
+// "You", or "E (Alice)"; youKey for "you" in the middle of a sentence.
+const whoIs = (seat, you, game, youKey = 'name.you') => (seat === you ? t(youKey) : playerName(seat, game));
 
 function renderSeat(el, player, game, you) {
   el.innerHTML = '';
@@ -867,39 +854,39 @@ function renderSeat(el, player, game, you) {
 
   const name = document.createElement('div');
   name.className = 'seat-name';
-  const who = player.seat === you && !view.replay ? `${nameOf(player.seat)} (you)` : nameOf(player.seat);
-  const offline = view.room.seats[player.seat]?.connected ? '' : ' (offline)';
+  let who = player.seat === you && !view.replay ? t('seat.you', { name: nameOf(player.seat) }) : nameOf(player.seat);
+  if (!view.room.seats[player.seat]?.connected) who = t('seat.offline', { name: who });
   // The dealer's seat wind (always E) is shown in red.
   const wind = seatWind(player.seat, game.dealer);
   name.innerHTML = (player.seat === game.dealer ? `<span class="dealer">${wind}</span>` : wind) +
-    ` · ${who}${offline} · <span class="score">${game.scores[player.seat].toLocaleString()}</span>`;
+    ` · ${who} · <span class="score">${game.scores[player.seat].toLocaleString()}</span>`;
   // The hand's score change, after a standard hand only: Baiman contest points already count
   // in the score as each win happens.
   const delta = result?.type === 'contest' ? 0 : result?.deltas?.[player.seat];
   if (delta) name.innerHTML += ` <span class="delta ${delta > 0 ? 'gain' : 'loss'}">(${delta > 0 ? '+' : ''}${delta.toLocaleString()})</span>`;
   if (result?.type === 'exhaustiveDraw') {
-    name.innerHTML += ` · ${result.tenpai.includes(player.seat) ? 'Tenpai' : 'Noten'}`;
-    if (result.nagashi.includes(player.seat)) name.innerHTML += ' · <span class="riichi-tag">Nagashi</span>';
+    name.innerHTML += ` · ${t(result.tenpai.includes(player.seat) ? 'seat.tenpai' : 'seat.noten')}`;
+    if (result.nagashi.includes(player.seat)) name.innerHTML += ` · <span class="riichi-tag">${t('seat.nagashi')}</span>`;
   }
-  if (game.phase === 'exchange' && game.exchange.picked[player.seat]) name.innerHTML += ' · tiles chosen';
+  if (game.phase === 'exchange' && game.exchange.picked[player.seat]) name.innerHTML += ` · ${t('seat.tilesChosen')}`;
   if (result?.type === 'contest' && result.nagashi.some((n) => n.seat === player.seat)) {
-    name.innerHTML += ' · <span class="riichi-tag">Nagashi</span>';
+    name.innerHTML += ` · <span class="riichi-tag">${t('seat.nagashi')}</span>`;
   }
   if (player.riichi) {
-    name.innerHTML += ` <span class="riichi-tag">${player.riichi.double ? 'Double riichi' : 'Riichi'}` +
-      `${player.riichi.ippatsu && !result ? ' · Ippatsu' : ''}</span>`;
+    name.innerHTML += ` <span class="riichi-tag">${t(player.riichi.double ? 'seat.doubleRiichi' : 'seat.riichi')}` +
+      `${player.riichi.ippatsu && !result ? ` · ${t('seat.ippatsu')}` : ''}</span>`;
   }
   if (player.callout) {
     const box = document.createElement('div');
     box.className = `callout callout-${player.callout}`;
-    box.textContent = CALLOUT_LABELS[player.callout];
+    box.textContent = t(`callout.${player.callout}`);
     name.appendChild(box);
   }
   if (view.replay && player.seat !== you) {
     // Replays: watch from this player's seat instead (after the score; the line's text is done).
     const switchBtn = document.createElement('button');
     switchBtn.className = 'switch-view';
-    switchBtn.textContent = 'Switch view';
+    switchBtn.textContent = t('replay.switchView');
     switchBtn.addEventListener('click', () => {
       replayPov = player.seat;
       renderReplay();
@@ -978,7 +965,7 @@ function renderSeat(el, player, game, you) {
     const f = game.furiten;
     const waits = view.replay ? player.replayWaits : game.waits;
     const furiten = view.replay ? player.replayFuriten : !!(f && (f.discard || f.temporary || f.riichi));
-    if (!waits.length) line.textContent = 'Not tenpai';
+    if (!waits.length) line.textContent = t('waits.notTenpai');
     else fillWaits(line, waits, furiten, player.seat);
     el.appendChild(line);
   }
@@ -1005,27 +992,35 @@ function renderSeat(el, player, game, you) {
 // One line per winner: the yaku and dora with their han, then han/fu and the payment.
 // A score's yaku and dora, e.g. "Riichi 1 · Tanyao 1 · Dora 2"; yakuman with their multiple.
 function yakuParts(s) {
-  if (s.yakuman) return s.yaku.map((y) => `${y.name}${y.yakuman > 1 ? ` (${y.yakuman}x)` : ''}`);
-  const parts = s.yaku.map((y) => `${y.name} ${y.han}`);
-  if (s.dora.dora) parts.push(`Dora ${s.dora.dora}`);
-  if (s.dora.aka) parts.push(`Red five ${s.dora.aka}`);
-  if (s.dora.ura) parts.push(`Ura dora ${s.dora.ura}`);
+  if (s.yakuman) return s.yaku.map((y) => (y.yakuman > 1 ? t('score.yakumanMultiple', { name: yakuName(y.name), n: y.yakuman }) : yakuName(y.name)));
+  const parts = s.yaku.map((y) => `${yakuName(y.name)} ${y.han}`);
+  if (s.dora.dora) parts.push(t('score.dora', { n: s.dora.dora }));
+  if (s.dora.aka) parts.push(t('score.aka', { n: s.dora.aka }));
+  if (s.dora.ura) parts.push(t('score.ura', { n: s.dora.ura }));
   return parts;
 }
+// A payment: "8,000" (ron), "4,000 all" (dealer tsumo), "2,000/4,000" (others' tsumo).
+function paymentText(p) {
+  if (p.ron !== undefined) return p.ron.toLocaleString();
+  if (p.all !== undefined) return t('score.all', { points: p.all.toLocaleString() });
+  return `${p.nonDealer.toLocaleString()}/${p.dealer.toLocaleString()}`;
+}
+const pointsText = (n) => t(n === 1 ? 'score.pointOne' : 'score.pointMany', { n });
 
 // Baiman contest: each win in order, with its han and limit but no fu (points don't need it).
 function contestBreakdownHtml(game, you) {
   const { result } = game;
   return result.wins.map((w, i) => {
     const s = result.scores[i];
-    const who = w.seat === you ? 'You' : playerName(w.seat, game);
-    const how = w.type === 'tsumo' ? 'tsumo' : `ron from ${w.from === you ? 'you' : playerName(w.from, game)}${w.chankan ? ', robbing a kan' : ''}`;
-    const value = s.yakuman ? s.limit : `${s.han} han${s.limit ? ` · ${s.limit}` : ''}`;
+    const who = whoIs(w.seat, you, game);
+    const from = whoIs(w.from, you, game, 'name.youObject');
+    const how = w.type === 'tsumo' ? t('score.byTsumo') : t(w.chankan ? 'score.byRonChankan' : 'score.byRon', { from });
+    const value = s.yakuman ? limitName(s.limit) : `${t('score.han', { han: s.han })}${s.limit ? ` · ${limitName(s.limit)}` : ''}`;
     return `<div class="breakdown"><b>${who}</b> (${how}): ${yakuParts(s).join(' · ')}<br>` +
-      `${value}: ${w.points} point${w.points === 1 ? '' : 's'}</div>`;
+      `${value}: ${pointsText(w.points)}</div>`;
   }).join('') + result.nagashi.map((n) => {
-    const who = n.seat === you ? 'You' : playerName(n.seat, game);
-    return `<div class="breakdown"><b>${who}</b>: Nagashi (${n.limit}): ${n.points} point${n.points === 1 ? '' : 's'}</div>`;
+    const who = whoIs(n.seat, you, game);
+    return `<div class="breakdown"><b>${who}</b>: ${t('score.nagashi', { limit: limitName(n.limit) })}: ${pointsText(n.points)}</div>`;
   }).join('');
 }
 
@@ -1053,33 +1048,23 @@ function breakdownHtml(game, you) {
   if (result?.type === 'contest') return contestBreakdownHtml(game, you); // wins, and nagashi at the wall
   if (result?.nagashiPay) {
     // An exhaustive draw with nagashi: each one's limit and payment, paid as a tsumo.
-    return result.nagashiPay.map(({ seat, limit, payment: p }) => {
-      const who = seat === you ? 'You' : playerName(seat, game);
-      const pay = p.all !== undefined ? `${p.all.toLocaleString()} all` : `${p.nonDealer.toLocaleString()}/${p.dealer.toLocaleString()}`;
-      return `<div class="breakdown"><b>${who}:</b> Nagashi (${limit}): ${pay}</div>`;
+    return result.nagashiPay.map(({ seat, limit, payment }) => {
+      const who = whoIs(seat, you, game);
+      return `<div class="breakdown"><b>${who}:</b> ${t('score.nagashi', { limit: limitName(limit) })}: ${paymentText(payment)}</div>`;
     }).join('');
   }
   if (!result?.scores) return '';
   return result.winners.map((seat, i) => {
     const s = result.scores[i];
-    const who = seat === you ? 'You' : playerName(seat, game);
-    if (s.han === 0) return `<div class="breakdown"><b>${who}:</b> no yaku, 0 points</div>`;
-    const p = s.payment;
-    const pay = p.ron !== undefined ? p.ron.toLocaleString()
-      : p.all !== undefined ? `${p.all.toLocaleString()} all`
-        : `${p.nonDealer.toLocaleString()}/${p.dealer.toLocaleString()}`;
+    const who = whoIs(seat, you, game);
+    if (s.han === 0) return `<div class="breakdown"><b>${who}:</b> ${t('score.noYaku')}</div>`;
+    const pay = paymentText(s.payment);
     // Yakuman replace han and fu; each is listed with its value (a double counts twice).
-    if (s.yakuman) {
-      const parts = s.yaku.map((y) => `${y.name}${y.yakuman > 1 ? ` (${y.yakuman}x)` : ''}`);
-      return `<div class="breakdown"><b>${who}:</b> ${parts.join(' · ')}<br>${s.limit}: ${pay}</div>`;
-    }
-    const parts = s.yaku.map((y) => `${y.name} ${y.han}`);
-    if (s.dora.dora) parts.push(`Dora ${s.dora.dora}`);
-    if (s.dora.aka) parts.push(`Red five ${s.dora.aka}`);
-    if (s.dora.ura) parts.push(`Ura dora ${s.dora.ura}`);
-    const value = s.limit ?? `${s.han} han ${s.fu} fu`;
-    return `<div class="breakdown"><b>${who}:</b> ${parts.join(' · ')}<br>` +
-      `${s.limit ? `${s.han} han ${s.fu} fu · ` : ''}${value}: ${pay}</div>`;
+    if (s.yakuman) return `<div class="breakdown"><b>${who}:</b> ${yakuParts(s).join(' · ')}<br>${limitName(s.limit)}: ${pay}</div>`;
+    const hanFu = t('score.hanFu', { han: s.han, fu: s.fu });
+    const value = s.limit ? limitName(s.limit) : hanFu;
+    return `<div class="breakdown"><b>${who}:</b> ${yakuParts(s).join(' · ')}<br>` +
+      `${s.limit ? `${hanFu} · ` : ''}${value}: ${pay}</div>`;
   }).join('');
 }
 
@@ -1091,93 +1076,91 @@ function passesHtml(game) {
     const seat = (game.dealer + w) % 4;
     return `${seatWind(seat, game.dealer)} -&gt; ${seatWind(game.passes[seat], game.dealer)}`;
   });
-  return `<div class="passes"><i>Tile passes: ${parts.join(', ')}</i></div>`;
+  return `<div class="passes"><i>${t('info.passes', { list: parts.join(', ') })}</i></div>`;
 }
 
 // Baiman contest: each win so far this hand with its value, under the format in the info panel.
 function contestWinsHtml(game, you) {
   return (game.contestWins ?? []).map((w) => {
-    const who = w.seat === you ? 'You' : playerName(w.seat, game);
-    const value = w.yakuman ? (w.yakuman > 1 ? `${w.yakuman}x yakuman` : 'Yakuman')
-      : `${w.han} han${w.limit === 'Kazoe yakuman' ? ' (kazoe yakuman)' : ''}`;
+    const who = whoIs(w.seat, you, game);
+    const value = w.yakuman ? (w.yakuman > 1 ? t('score.yakumanTimes', { n: w.yakuman }) : limitName('Yakuman'))
+      : t(w.limit === 'Kazoe yakuman' ? 'score.kazoe' : 'score.han', { han: w.han });
     return `<div class="contest-win">${who}: ${value}</div>`;
   }).join('');
 }
 
 function statusText(game, you) {
   const { result } = game;
+  const names = (seats, key = 'join.comma') => joinWith(key, seats.map((s) => whoIs(s, you, game)));
   if (result?.type === 'abortiveDraw') {
-    if (result.reason === 'suucha riichi') return 'Abortive draw: all four players declared riichi';
-    if (result.reason === 'suukaikan') return 'Abortive draw: four kans by more than one player';
-    if (result.reason === 'suufon renda') return 'Abortive draw: all four players discarded the same wind';
+    if (result.reason === 'suucha riichi') return t('status.suucha');
+    if (result.reason === 'suukaikan') return t('status.suukaikan');
+    if (result.reason === 'suufon renda') return t('status.suufon');
     const [seat] = result.revealed;
-    return `Abortive draw: ${seat === you ? 'you' : playerName(seat, game)} declared nine terminals and honors`;
+    return t('status.kyuushu', { who: whoIs(seat, you, game, 'name.youObject') });
   }
-  if (result?.type === 'exhaustiveDraw' && result.nagashi.length > 0) {
-    const names = result.nagashi.map((s) => (s === you ? 'You' : playerName(s, game)));
-    return `Exhaustive draw: nagashi for ${names.join(' and ')}`;
-  }
+  if (result?.type === 'exhaustiveDraw' && result.nagashi.length > 0) return t('status.nagashi', { names: names(result.nagashi, 'join.and') });
   if (result?.type === 'exhaustiveDraw') {
     const { tenpai } = result;
-    if (tenpai.length === 0) return 'Exhaustive draw: nobody is tenpai';
-    if (tenpai.length === 4) return 'Exhaustive draw: everyone is tenpai';
-    const names = tenpai.map((s) => (s === you ? 'You' : playerName(s, game)));
-    return `Exhaustive draw: ${names.join(', ')} ${tenpai.length === 1 && tenpai[0] !== you ? 'is' : 'are'} tenpai`;
+    if (tenpai.length === 0) return t('status.nobodyTenpai');
+    if (tenpai.length === 4) return t('status.everyoneTenpai');
+    return t(tenpai.length === 1 && tenpai[0] !== you ? 'status.oneTenpai' : 'status.someTenpai', { names: names(tenpai) });
   }
   if (result?.type === 'contest') {
-    const names = (seats) => seats.map((s) => (s === you ? 'You' : playerName(s, game))).join(', ');
-    const nagashi = result.nagashi.length ? `; nagashi for ${names(result.nagashi.map((n) => n.seat))}` : '';
-    if (result.reason === 'yakuman') return `A yakuman ends the match: ${names(result.winners)} won`;
-    if (!result.winners.length) return `Wall exhausted: nobody won${nagashi}`;
-    return `${result.reason === 'three winners' ? 'Three players won' : 'Wall exhausted'}: ${names(result.winners)}${nagashi}`;
+    const nagashi = result.nagashi.length ? names(result.nagashi.map((n) => n.seat)) : null;
+    if (result.reason === 'yakuman') return t('status.contestYakuman', { names: names(result.winners) });
+    if (!result.winners.length) return nagashi ? t('status.contestNobodyNagashi', { nagashi }) : t('status.contestNobody');
+    const key = result.reason === 'three winners' ? 'status.contestThree' : 'status.contestWall';
+    return t(nagashi ? `${key}Nagashi` : key, { names: names(result.winners), nagashi });
   }
   if (result?.type === 'tsumo') {
     const [winner] = result.winners;
-    return `${winner === you ? 'You win' : `${playerName(winner, game)} wins`} by tsumo on ${tileLabel(result.tile)}`;
+    return winner === you ? t('status.youTsumo', { tile: tileText(result.tile) }) : t('status.tsumo', { who: playerName(winner, game), tile: tileText(result.tile) });
   }
   if (result?.type === 'ron') {
-    const names = result.winners.map((s) => (s === you ? 'You' : playerName(s, game)));
-    const verb = result.winners.length === 1 && result.winners[0] !== you ? 'wins' : 'win';
-    const from = result.from === you ? 'you' : playerName(result.from, game);
-    return `${names.join(' and ')} ${verb} by ron${result.chankan ? ' (robbing a kan)' : ''} on ${tileLabel(result.tile)} from ${from}`;
+    const one = result.winners.length === 1 && result.winners[0] !== you;
+    const key = `status.${one ? 'ronOne' : 'ronMany'}${result.chankan ? 'Chankan' : ''}`;
+    return t(key, { names: names(result.winners, 'join.and'), tile: tileText(result.tile), from: whoIs(result.from, you, game, 'name.youObject') });
   }
   // Whose turn it is shows as a bold name line, not here. The pause before a draw (which is
   // also how others deciding on a call look) has no status text.
   if (game.phase === 'exchange') {
     const waiting = game.exchange.picked.filter((p) => !p).length;
-    if (you === null || game.exchange.mine) return `Tile exchange: waiting for ${waiting} more player${waiting === 1 ? '' : 's'} to choose`;
-    return 'Tile exchange: choose 3 tiles to pass (not the wild tile); they go to a random other player';
+    if (you === null || game.exchange.mine) return t(waiting === 1 ? 'status.exchangeWaitingOne' : 'status.exchangeWaitingMany', { n: waiting });
+    return t('status.exchangeChoose');
   }
-  if (game.contest && game.players[you]?.won) return 'You have won: waiting for the hand to end';
+  if (game.contest && game.players[you]?.won) return t('status.contestWon');
   if (game.phase === 'draw' || game.phase === 'held') return ''; // held: the pause before a win's result
-  if (game.phase === 'rinshan') return game.current === you ? 'Kan: drawing a replacement tile…' : '';
+  if (game.phase === 'rinshan') return game.current === you ? t('status.rinshan') : '';
   if (game.phase === 'claim') {
-    const tile = tileLabel(game.lastDiscard.tile);
-    if (game.lastDiscard.chankan) return game.canRon ? `You can rob the kan: ron on ${tile}` : '';
-    const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.openKanOptions.length && 'kan', game.chiiOptions.length && 'chii'].filter(Boolean);
-    return can.length ? `You can ${can.join(' or ')} on ${tile}` : '';
+    const tile = tileText(game.lastDiscard.tile);
+    if (game.lastDiscard.chankan) return game.canRon ? t('status.robKan', { tile }) : '';
+    const can = [game.canRon && 'ron', game.ponOptions.length && 'pon', game.openKanOptions.length && 'kan', game.chiiOptions.length && 'chii']
+      .filter(Boolean).map((c) => t(`status.call.${c}`));
+    return can.length ? t('status.canCall', { calls: joinWith('status.callOr', can), tile }) : '';
   }
-  if (game.current === you && choosingRiichi) return 'Riichi: choose a tile to discard';
-  if (game.current === you && game.autoDiscarding) return game.players[you].riichi ? 'Riichi: discarding…' : 'Auto: discarding…';
+  if (game.current === you && choosingRiichi) return t('status.chooseRiichi');
+  if (game.current === you && game.autoDiscarding) return t(game.players[you].riichi ? 'status.riichiDiscarding' : 'status.autoDiscarding');
   if (game.current === you && game.players[you].riichi) {
-    const options = [game.canTsumo && 'tsumo', game.kanOptions.length && 'kan'].filter(Boolean).join(' or ');
-    return `Riichi: ${options}, or click the drawn tile to pass`;
+    const kan = game.kanOptions.length > 0;
+    if (!game.canTsumo && !kan) return '';
+    return t(game.canTsumo && kan ? 'status.riichiTsumoKan' : game.canTsumo ? 'status.riichiTsumo' : 'status.riichiKan');
   }
-  if (game.current === you) return game.canTsumo ? 'Your turn: tsumo or discard' : 'Your turn: discard a tile';
+  if (game.current === you) return t(game.canTsumo ? 'status.yourTurnTsumo' : 'status.yourTurn');
   return '';
 }
 
 // The end-of-match standings.
+const FINAL_REASONS = {
+  'last hand': 'final.lastHand', 'target reached': 'final.targetReached', 'extension over': 'final.extensionOver',
+  bust: 'final.bust', 'agari-yame': 'final.agariYame', yakuman: 'final.yakuman',
+};
 function finalHtml(match, you) {
-  const rows = match.final.ranking.map((r) => `<tr><td>${r.place}</td><td>${nameOf(r.seat)}${r.seat === you ? ' (you)' : ''}</td>` +
+  const rows = match.final.ranking.map((r) => `<tr><td>${r.place}</td><td>${r.seat === you ? t('final.you', { name: nameOf(r.seat) }) : nameOf(r.seat)}</td>` +
     `<td>${r.score.toLocaleString()}</td></tr>`).join('');
-  const reasons = {
-    'last hand': 'The last hand is over.', 'target reached': 'Someone reached 30,000 in sudden death.',
-    'extension over': 'Sudden death ran out.', bust: 'Someone went below 0.', 'agari-yame': 'The dealer ended it in first place.',
-    yakuman: 'A yakuman ended the match.',
-  };
-  return `<div class="final"><div class="status">Match over</div><div>${reasons[match.final.reason] ?? ''}</div>` +
-    `<table><tr><th>Place</th><th>Player</th><th>Score</th></tr>${rows}</table></div>`;
+  const reason = FINAL_REASONS[match.final.reason];
+  return `<div class="final"><div class="status">${t('final.over')}</div><div>${reason ? t(reason) : ''}</div>` +
+    `<table><tr><th>${t('final.place')}</th><th>${t('final.player')}</th><th>${t('final.score')}</th></tr>${rows}</table></div>`;
 }
 
 // Five slots per row: the first indicator plus one for each possible kan. Revealed dora
@@ -1217,21 +1200,22 @@ function render() {
   infoEl.innerHTML = `
     ${match.over ? finalHtml(match, you) : ''}
     ${(() => { const status = view.replay && !game.result ? view.replay.note : statusText(game, you); return status ? `<div class="status">${status}</div>` : ''; })()}
-    <div class="hand-label">${match.label}${game.honba ? ` · ${game.honba} honba` : ''}</div>
+    <div class="hand-label">${game.honba ? t('info.honba', { label: roundLabel(match.label), n: game.honba }) : roundLabel(match.label)}</div>
     ${passesHtml(game)}
-    <div>Wall: ${game.wallCount} tiles left</div>
-    ${game.contest ? `<div>Baiman contest</div>${contestWinsHtml(game, you)}` : `<div>Riichi sticks: ${game.riichiSticks} (${(game.riichiSticks * 1000).toLocaleString()})</div>`}
-    ${game.result?.honbaBonus ? `<div>Honba: +${game.result.honbaBonus.toLocaleString()}</div>` : ''}
-    ${you === null ? '<div>Watching</div>' : ''}
-    ${offline ? `<div>${offline} player${offline > 1 ? 's' : ''} offline</div>` : ''}
-    <div class="room-code">Room ${room.code}</div>
+    <div>${t('info.wall', { n: game.wallCount })}</div>
+    ${game.contest ? `<div>${t('info.contest')}</div>${contestWinsHtml(game, you)}`
+    : `<div>${t('info.sticks', { n: game.riichiSticks, points: (game.riichiSticks * 1000).toLocaleString() })}</div>`}
+    ${game.result?.honbaBonus ? `<div>${t('info.honbaBonus', { points: game.result.honbaBonus.toLocaleString() })}</div>` : ''}
+    ${you === null ? `<div>${t('info.watching')}</div>` : ''}
+    ${offline ? `<div>${t(offline > 1 ? 'info.offlineMany' : 'info.offlineOne', { n: offline })}</div>` : ''}
+    <div class="room-code">${t('info.room', { code: room.code })}</div>
   `;
   alertScores(game, you);
   autoEl.hidden = you === null || !!view.replay;
   $('replay-nav').hidden = !view.replay;
   $('replay-options').hidden = !view.replay;
   $('table-hint').hidden = !!view.replay;
-  leaveTableBtn.textContent = view.replay ? 'Back' : 'Leave';
+  leaveTableBtn.textContent = t(view.replay ? 'table.back' : 'table.leave');
   for (const box of autoBoxes) box.checked = !!view.auto?.[box.dataset.auto];
   const ended = game.phase === 'ended';
   nextHandBtn.hidden = !ended || match.over || you === null || !!view.replay;
@@ -1249,7 +1233,7 @@ function render() {
   if (game.phase !== 'exchange' || game.exchange.mine) exchangePicks = new Set();
   exchangeBtn.hidden = !(game.phase === 'exchange' && you !== null && !game.exchange.mine);
   exchangeBtn.disabled = exchangePicks.size !== 3;
-  exchangeBtn.textContent = `Pass 3 tiles (${exchangePicks.size}/3)`;
+  exchangeBtn.textContent = t('table.exchange', { n: exchangePicks.size });
 
   // One Pon or Chii button per distinct pair of tiles you could reveal.
   callOptionsEl.innerHTML = '';
@@ -1262,17 +1246,17 @@ function render() {
     btn.addEventListener('click', () => send(msg));
     callOptionsEl.appendChild(btn);
   };
-  for (const [type, label, key] of [['pon', 'Pon', 'ponOptions'], ['kan', 'Kan', 'openKanOptions'], ['chii', 'Chii', 'chiiOptions']]) {
+  for (const [type, label, key] of [['pon', 'table.pon', 'ponOptions'], ['kan', 'table.openKan', 'openKanOptions'], ['chii', 'table.chii', 'chiiOptions']]) {
     for (const pair of game[key]) {
-      const labels = pair.map((id) => tileLabel(mine.find((t) => t.id === id)));
-      button(`${label} ${labels.join(' ')}`, { type, tiles: pair });
+      const labels = pair.map((id) => tileText(mine.find((tile) => tile.id === id)));
+      button(t(label, { tiles: labels.join(' ') }), { type, tiles: pair });
     }
   }
   // Closed or added kans on your own turn.
   const allMine = [...mine, ...(game.players[you]?.drawn ? [game.players[you].drawn] : [])];
   for (const option of game.kanOptions) {
-    const tile = allMine.find((t) => t.id === option.tiles[0]);
-    button(`Kan ${tileLabel(tile)}${option.type === 'kakan' ? ' (added)' : ''}`, { type: 'kan', kind: option.kind });
+    const tile = allMine.find((x) => x.id === option.tiles[0]);
+    button(t(option.type === 'kakan' ? 'table.addedKan' : 'table.closedKan', { tile: tileText(tile) }), { type: 'kan', kind: option.kind });
   }
 }
 
@@ -1318,6 +1302,23 @@ document.addEventListener('keydown', (e) => {
     send({ type: 'discard', tileId: me.drawn.id });
   }
 });
+
+// The language pickers (main page, waiting room, Recent matches): a change redoes the static text
+// and draws the current page again.
+function refreshLanguage() {
+  applyStatic();
+  drawCreateSettings();
+  if (route() === 'replays') renderMatches();
+  else if (route() === 'replays/match' && replayMatch && view?.replay) renderReplay();
+  else if (view && !view.replay) render();
+}
+for (const input of document.querySelectorAll('.lang-picker input')) {
+  input.addEventListener('change', () => {
+    setLang(input.value);
+    refreshLanguage();
+  });
+}
+applyStatic();
 
 // The page for the address this tab opened at (the game page waits for the server, above).
 if (route() !== 'game') showRoute();
