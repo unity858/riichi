@@ -1,7 +1,8 @@
 // Records standard matches in an SQLite database (Node's built-in node:sqlite), so every hand
 // can be recovered or replayed: replay.js rebuilds a hand from its seed and its actions.
 //
-//   matches  one row per match: room code, start and end times, settings, players, final result
+//   matches  one row per match: room code, start and end times, settings, players by seat (seats
+//            are shuffled at the start), the host's seat, final result
 //   hands    one row per hand: the wall's full order (seed: live and dead wall), the starting
 //            dealer, round wind, honba, riichi sticks and scores, and the result once it ends
 //   actions  every action of a hand in order (state.log: discards, calls with the tiles they
@@ -23,6 +24,7 @@ CREATE TABLE IF NOT EXISTS matches (
   settings   TEXT NOT NULL,     -- JSON: the room's settings
   players    TEXT NOT NULL,     -- JSON: names by seat (seat 0 deals first)
   debug      INTEGER NOT NULL,  -- 1 if the server ran with DEBUG_SEED (fixed walls)
+  host       INTEGER,           -- the host's seat (seats are shuffled at the start of a match)
   final      TEXT               -- JSON: { reason, ranking: [{ seat, place, score }] }
 );
 CREATE TABLE IF NOT EXISTS hands (
@@ -61,8 +63,10 @@ export function openRecorder(file) {
   const db = new DatabaseSync(file);
   db.exec('PRAGMA journal_mode = WAL;'); // readers can query while the server writes
   db.exec(SCHEMA);
+  // Databases made before the host column: add it (older matches have none).
+  if (!db.prepare('PRAGMA table_info(matches)').all().some((c) => c.name === 'host')) db.exec('ALTER TABLE matches ADD COLUMN host INTEGER');
   const q = {
-    match: db.prepare('INSERT INTO matches (room, started_at, settings, players, debug) VALUES (?, ?, ?, ?, ?)'),
+    match: db.prepare('INSERT INTO matches (room, started_at, settings, players, debug, host) VALUES (?, ?, ?, ?, ?, ?)'),
     matchEnd: db.prepare('UPDATE matches SET ended_at = ?, final = ? WHERE id = ?'),
     hand: db.prepare(`INSERT INTO hands (match_id, number, label, dealer, round_wind, honba, riichi_sticks, scores, rules, seed, started_at)
                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -82,13 +86,13 @@ export function openRecorder(file) {
   return {
     db,
     // A new match in room (a standard one; others are skipped). Sets room.record.
-    startMatch(room, { debug = false } = {}) {
+    startMatch(room, { debug = false, host = null } = {}) {
       room.record = null;
       if (room.match.settings.format !== 'standard') return;
       safely('a match', () => {
         const players = room.seats.map((p) => p?.name ?? null);
         const startedAt = now(); // with the room code, the address of the match's replay
-        const { lastInsertRowid } = q.match.run(room.code, startedAt, JSON.stringify(room.match.settings), JSON.stringify(players), debug ? 1 : 0);
+        const { lastInsertRowid } = q.match.run(room.code, startedAt, JSON.stringify(room.match.settings), JSON.stringify(players), debug ? 1 : 0, host);
         room.record = { matchId: Number(lastInsertRowid), startedAt, hands: 0, handId: null, logged: 0, handDone: false, matchDone: false };
       });
     },
@@ -145,7 +149,7 @@ export function openRecorder(file) {
       }));
       return {
         room: m.room, startedAt: m.started_at, endedAt: m.ended_at, settings: JSON.parse(m.settings),
-        players: JSON.parse(m.players), final: JSON.parse(m.final), hands,
+        players: JSON.parse(m.players), host: m.host ?? 0, final: JSON.parse(m.final), hands,
       };
     },
     close() {

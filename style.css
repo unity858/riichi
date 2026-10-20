@@ -271,3 +271,10 @@ button.selected { outline: 2px solid #1565c0; }
 /* The language picker, under the page heading. */
 .lang-picker { margin: -8px 0 12px; font-size: 0.9em; }
 .lang-picker label { margin-right: 10px; }
+
+/* "Reset game", in the top left corner of the table. */
+#table { position: relative; }
+#reset-game { position: absolute; top: 8px; left: 8px; z-index: 5; font-size: 0.85em; }
+
+/* The host's ❌ next to each other player in the waiting room: removes them from the room. */
+#seat-list .kick { margin-right: 6px; padding: 0 4px; border: none; background: none; cursor: pointer; font-size: 0.9em; }

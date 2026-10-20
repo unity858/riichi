@@ -16,7 +16,7 @@ import { WebSocketServer } from 'ws';
 import {
   newHand, draw, discard, tsumo, claim, chooseExchange, canTsumo, canRon, ponOptions, chiiOptions, riichiDiscards, declareRiichi,
   canKyuushu, declareKyuushu, kanOptions, declareKan, openKanOptions, waitYaku, discardPreview,
-  autoDiscardDue, furitenStatus, createWall, checkIntegrity,
+  autoDiscardDue, furitenStatus, createWall, checkIntegrity, shuffle,
 } from './game.js';
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
@@ -122,7 +122,7 @@ const server = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server });
 
 // --- Rooms ---
-// room: { code, settings, hostId, seats: [{ id, name, ws } | null] x4, spectators: Set<ws>,
+// room: { code, settings, hostId, seats: [{ id, name, sockets: Set<ws>, auto } | null] x4, spectators: Set<ws>,
 //         match, state, emptyTimer }
 const rooms = new Map();
 
@@ -137,8 +137,13 @@ function cleanName(name) {
   return trimmed || 'Player';
 }
 
-const connected = (room) => room.seats.filter((p) => p?.ws).length + room.spectators.size;
-const seatOf = (room, ws) => room.seats.findIndex((p) => p?.ws === ws);
+// A seat ({ id, name, sockets, auto }) can have several windows connected at once: rejoining by
+// the same player id, or by the same name ("shadowing", e.g. after switching computers), adds a
+// window to the seat. Each window acts for the seat; it is online while any of them is connected.
+const online = (p) => !!p && p.sockets.size > 0;
+const sendSeat = (p, msg) => { for (const ws of p.sockets) send(ws, msg); };
+const connected = (room) => room.seats.filter(online).length + room.spectators.size;
+const seatOf = (room, ws) => room.seats.findIndex((p) => p?.sockets.has(ws));
 
 function hostSeat(room) {
   return room.seats.findIndex((p) => p?.id === room.hostId);
@@ -250,7 +255,7 @@ function viewFor(room, ws) {
       code: room.code,
       settings: room.settings,
       hostSeat: hostSeat(room),
-      seats: room.seats.map((p) => (p ? { name: p.name, connected: !!p.ws } : null)),
+      seats: room.seats.map((p) => (p ? { name: p.name, connected: online(p) } : null)),
       spectators: room.spectators.size,
       started: !!m,
     },
@@ -277,7 +282,7 @@ function send(ws, msg) {
 }
 
 function broadcast(room) {
-  for (const p of room.seats) if (p?.ws) send(p.ws, viewFor(room, p.ws));
+  for (const p of room.seats) for (const ws of p?.sockets ?? []) send(ws, viewFor(room, ws));
   for (const ws of room.spectators) send(ws, viewFor(room, ws));
 }
 
@@ -417,30 +422,57 @@ function startHand(room) {
   console.log(`[${room.code}] ${handLabel(room.match)}, ${room.match.honba} honba. Integrity: ${checkIntegrity(room.state)}. Seed: ${seed}`);
 }
 
+// A match deals from shuffled seats, so who is East in East 1 (and so on) is random; the waiting
+// page keeps its join order (room.joinOrder, put back by backToWaiting). With DEBUG_SEED the seats
+// aren't shuffled, so seed files can say which tab gets which hand. The host is whoever has
+// hostId, wherever they sit, and is recorded with the match.
 function startMatch(room) {
+  room.joinOrder = [...room.seats];
+  if (!SEED) shuffle(room.seats);
   room.match = newMatch(room.settings);
-  recorder?.startMatch(room, { debug: !!SEED });
+  recorder?.startMatch(room, { debug: !!SEED, host: hostSeat(room) });
   startHand(room);
 }
 
 // --- Messages ---
 
+// Back to the waiting room (after Rematch, or a "Reset game" everyone agreed to), where the host
+// can change settings and start again. Seats of players who are gone are freed, as if they had
+// left before the match.
+let resetVotes = 0;
+// A reset vote passes once every voter still online has said OK (at least one of them): a voter
+// who goes offline during the vote no longer counts (see leaveRoom).
+function checkResetVote(room) {
+  const vote = room.resetVote;
+  if (!vote) return;
+  const stillOnline = vote.voters.filter((i) => online(room.seats[i]));
+  if (vote.agreed.size > 0 && stillOnline.every((i) => vote.agreed.has(i))) backToWaiting(room);
+}
+function backToWaiting(room) {
+  const order = room.joinOrder ?? room.seats; // the waiting page's own order
+  room.match = null;
+  room.state = null;
+  room.resetVote = null;
+  room.seats = order.map((p) => (p && room.seats.includes(p) && online(p) ? p : null));
+  room.joinOrder = null;
+  broadcast(room);
+}
+
 function joinRoom(ws, room, id, name) {
   leaveRoom(ws);
   ws.room = room;
   const mine = room.seats.findIndex((p) => p?.id === id);
+  const sameName = room.seats.findIndex((p) => p?.name === name);
   if (mine >= 0) {
-    // Same player (e.g. a reloaded tab): take the seat back.
-    const old = room.seats[mine].ws;
-    if (old && old !== ws) {
-      old.room = null;
-      send(old, { type: 'error', code: 'seatTaken', message: 'This seat was opened in another tab.' }); // code: see error.* in i18n.js
-      old.close();
-    }
-    room.seats[mine].ws = ws;
+    // Same player (a reloaded or duplicated tab): another window for their seat.
+    room.seats[mine].sockets.add(ws);
     room.seats[mine].name = name;
+  } else if (sameName >= 0) {
+    // Shadowing: joining under a seated player's name acts for that seat too (switching
+    // computers, without leaving on the other one).
+    room.seats[sameName].sockets.add(ws);
   } else if (!room.match && room.seats.includes(null)) {
-    room.seats[room.seats.indexOf(null)] = { id, name, ws };
+    room.seats[room.seats.indexOf(null)] = { id, name, sockets: new Set([ws]) };
     if (!room.hostId) room.hostId = id;
   } else {
     room.spectators.add(ws);
@@ -456,9 +488,11 @@ function leaveRoom(ws) {
   ws.room = null;
   room.spectators.delete(ws);
   const seat = seatOf(room, ws);
-  if (seat >= 0) {
+  if (seat >= 0) room.seats[seat].sockets.delete(ws);
+  if (seat >= 0 && !online(room.seats[seat])) { // their last window
     if (room.match) {
-      room.seats[seat].ws = null; // kept for them until they come back
+      // The seat is kept for them until they come back; they no longer count in a reset vote.
+      checkResetVote(room);
     } else {
       // Before the match, leaving frees the seat; the host role passes to the next player.
       const { id } = room.seats[seat];
@@ -472,15 +506,16 @@ function leaveRoom(ws) {
 
 function handle(ws, msg) {
   const id = typeof msg.id === 'string' ? msg.id.slice(0, 64) : null;
+  const name = cleanName(msg.name);
   if (msg.type === 'create') {
     if (!id) return;
     const room = {
       code: newCode(), settings: normalizeSettings(msg.settings), hostId: id,
-      seats: [null, null, null, null], spectators: new Set(), match: null, state: null, emptyTimer: null,
+      seats: [null, null, null, null], spectators: new Set(), match: null, state: null, emptyTimer: null, resetVote: null, joinOrder: null,
     };
     rooms.set(room.code, room);
     console.log(`[${room.code}] created`);
-    joinRoom(ws, room, id, cleanName(msg.name));
+    joinRoom(ws, room, id, name);
     return;
   }
   if (msg.type === 'join') {
@@ -490,7 +525,7 @@ function handle(ws, msg) {
       send(ws, { type: 'error', code: code ? 'noRoom' : 'noRoomBlank', params: { code }, message: `There is no room ${code || '(blank)'}.` });
       return;
     }
-    joinRoom(ws, room, id, cleanName(msg.name));
+    joinRoom(ws, room, id, name);
     return;
   }
 
@@ -509,6 +544,15 @@ function handle(ws, msg) {
   if (msg.type === 'settings' && isHost && !room.match) {
     room.settings = normalizeSettings(msg.settings);
     broadcast(room);
+  } else if (msg.type === 'kick' && isHost && !room.match && Number.isInteger(msg.seat) && room.seats[msg.seat] && msg.seat !== seat) {
+    // The host removes a player from the waiting page (not a ban: they can come back with the
+    // link). Their window is told, and goes back to the main page.
+    const target = room.seats[msg.seat];
+    room.seats[msg.seat] = null;
+    for (const ws of target.sockets) ws.room = null; // every window of that seat
+    sendSeat(target, { type: 'kicked' });
+    checkEmpty(room);
+    broadcast(room);
   } else if (msg.type === 'start' && isHost && !room.match && room.seats.every(Boolean)) {
     startMatch(room);
     update(room);
@@ -516,12 +560,20 @@ function handle(ws, msg) {
     startHand(room);
     update(room);
   } else if (msg.type === 'rematch' && isHost && room.match?.over) {
-    // Back to the waiting room, where the host can change settings and start again. Seats of
-    // players who are gone are freed, as if they had left before the match.
-    room.match = null;
-    room.state = null;
-    room.seats = room.seats.map((p) => (p?.ws ? p : null));
-    broadcast(room);
+    backToWaiting(room);
+  } else if (msg.type === 'resetRequest' && room.match && !room.resetVote) {
+    // "Reset game": the seated players online now are asked (a confirm in each window, the
+    // asker's too). Offline players aren't: a player gone offline is a common reason to reset.
+    const voters = room.seats.flatMap((p, i) => (online(p) ? [i] : []));
+    room.resetVote = { id: ++resetVotes, voters, agreed: new Set() };
+    for (const i of voters) sendSeat(room.seats[i], { type: 'resetConfirm', id: room.resetVote.id, from: room.seats[seat].name });
+  } else if (msg.type === 'resetAnswer' && room.resetVote?.id === msg.id && room.resetVote.voters.includes(seat)) {
+    // One "Cancel" ends the vote; otherwise see checkResetVote.
+    if (msg.ok !== true) room.resetVote = null;
+    else {
+      room.resetVote.agreed.add(seat);
+      checkResetVote(room);
+    }
   } else if (msg.type === 'auto') {
     room.seats[seat].auto = normalizeAuto(msg.settings);
     update(room);

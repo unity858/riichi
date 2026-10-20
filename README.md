@@ -27,6 +27,8 @@ Match settings (chosen by the host before the start):
 | Length | East + South (hanchan, default), or East only (tonpuusen) |
 | Bust | on: the match ends as soon as someone is below 0 |
 
+Seats are shuffled at the start of every match, so who deals first is random (except with `DEBUG_SEED`, so seed files can say which tab gets which hand); the waiting page keeps its join order. The host can remove other players from the waiting page with the ❌ next to their name (they can come back with the link).
+
 Fixed rules: sudden death (if nobody has 30,000 after the last hand, play continues into the next wind until someone does; not in the Baiman contest) and agari-yame (in the last hand, a dealer who repeats while in first place ends the match) always apply; the dealer repeats after a win or when tenpai at an exhaustive draw; honba go up on a repeat and on every exhaustive draw, reset after a non-dealer win, and are worth 300 each to the winner; riichi sticks left at the end go to first place.
 
 During a hand, each player's Auto checklist (on the table) can ron and tsumo for them whenever it is legal, skip every pon, chii and kan offer, and discard each draw (tsumogiri, never a tile that could be a tsumo). It can be changed at any time and switches off at the start of every hand.
@@ -66,7 +68,7 @@ The server records every standard match (not Baiman contest ones) in an SQLite d
 
 | Table | One row per | Columns |
 | --- | --- | --- |
-| `matches` | match | `room`, `started_at`, `ended_at`, `settings`, `players`, `debug`, `final` |
+| `matches` | match | `room`, `started_at`, `ended_at`, `settings`, `players` (by seat), `debug`, `host` (the host's seat), `final` |
 | `hands` | hand | `match_id`, `number`, `label`, `dealer`, `round_wind`, `honba`, `riichi_sticks`, `scores` (at the start), `rules`, `seed`, `started_at`, `ended_at`, `result` |
 | `actions` | action | `hand_id`, `seq`, `type`, `seat`, `data` (the whole action as JSON) |
 
@@ -78,7 +80,7 @@ node tools/replay.mjs match 3       # the hands of match 3
 node tools/replay.mjs hand 12       # hand 12 move by move, replayed and checked against its result
 ```
 
-The replay page (`/replays/match?...`) does the same in the browser: every hand face up, seen from the room's first seat (East in East 1) until you press "Switch view" on another player. The navbar under the dora panel steps by round (hand) or by step (each draw, and each action: a discard, call, kan or win); scrolling over the table and the ← → keys move a step. The address keeps the hand and step, so you can link to a moment. Only finished matches have replays: one still being played would show everyone's hands.
+The replay page (`/replays/match?...`) does the same in the browser: every hand face up, seen from the room host's seat until you press "Switch view" on another player. The navbar under the dora panel steps by round (hand) or by step (each draw, and each action: a discard, call, kan or win); scrolling over the table and the ← → keys move a step. The address keeps the hand and step, so you can link to a moment. Only finished matches have replays: one still being played would show everyone's hands.
 
 Replays re-run the current rules, so after a rule change older records may no longer fit (the page then says the hand can't be replayed). The plan is to start a fresh database instead: stop the server and delete `matches.db` (and `matches.db-wal`, `matches.db-shm`).
 

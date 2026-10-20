@@ -109,6 +109,7 @@ const myName = () => {
   localStorage.setItem('riichiName', name);
   return name;
 };
+
 // The page for the current address, relative to the site root: '' (the main page), 'replays',
 // 'replays/match' or 'game'; and its query.
 const route = () => (location.pathname.startsWith(rootPath) ? location.pathname.slice(rootPath.length) : '');
@@ -170,6 +171,15 @@ ws.addEventListener('message', (e) => {
     else $('lobby-error').textContent = msg.message;
   } else if (msg.type === 'state') {
     if (route() === 'game') showState(msg); // not after leaving with Back
+  } else if (msg.type === 'kicked') {
+    // The host removed us from the room: back to the main page, saying so.
+    joinedCode = null;
+    view = null;
+    if (route() === 'game') navigate('./');
+    setText($('lobby-error'), 'lobby.kicked');
+  } else if (msg.type === 'resetConfirm') {
+    // Someone pressed "Reset game": OK (in every player's window) agrees, Cancel stops it.
+    setTimeout(() => send({ type: 'resetAnswer', id: msg.id, ok: confirm(t('table.resetConfirm', { name: msg.from })) }), 0);
   }
 });
 
@@ -399,7 +409,7 @@ $('matches-back').addEventListener('click', () => navigate('./'));
 
 // --- A match's replay: replays/match?room=<code>&start=<time>[&hand=<n>&step=<k>] ---
 // The match (from api/match) is replayed in the browser with replay.js and shown on the table,
-// every hand face up, watched from one seat (the room's first seat, East in East 1, until
+// every hand face up, watched from one seat (the room's host, until
 // "Switch view"). A hand's steps are its start (the dealer holding their first draw), then each
 // draw and each action (a discard, call, kan or win) in turn, the last being the hand's end
 // (see replaySteps). The navbar under the dora panel, scrolling over the table and the arrow
@@ -450,6 +460,7 @@ async function showReplay() {
     }
     if (route() !== 'replays/match' || query('room') !== room || query('start') !== start) return; // moved on meanwhile
     replayMatch = { key, data, steps: [] };
+    replayPov = data.host ?? 0; // the room's host (seats are shuffled, so not always East)
   }
   const { hands } = replayMatch.data;
   const hand = clamp(Number(query('hand') ?? 1) - 1, 0, hands.length - 1);
@@ -637,6 +648,7 @@ $('copy-link').addEventListener('click', async () => {
 });
 $('start').addEventListener('click', () => send({ type: 'start' }));
 $('leave-waiting').addEventListener('click', () => send({ type: 'leave' }));
+$('reset-game').addEventListener('click', () => send({ type: 'resetRequest' }));
 // The finished match's replay link opens in place (leaving the room), unless opened in a new tab.
 $('replay-link').firstElementChild.addEventListener('click', (e) => {
   if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -650,17 +662,27 @@ function renderWaiting() {
   $('waiting-heading').textContent = t('waiting.heading', { code: room.code });
   const list = $('seat-list');
   list.innerHTML = '';
+  const isHost = you !== null && you === room.hostSeat;
   room.seats.forEach((p, i) => {
     const li = document.createElement('li');
     let text = p ? (i === you ? t('waiting.you', { name: p.name }) : p.name) : t('waiting.empty');
     if (p && i === room.hostSeat) text = t('waiting.host', { seat: text });
     if (p && !p.connected) text = t('waiting.offline', { seat: text });
     li.textContent = text;
+    // The host can remove anyone else (a kick, not a ban: they can come back with the link).
+    if (isHost && p && i !== room.hostSeat) {
+      const kick = document.createElement('button');
+      kick.className = 'kick';
+      kick.textContent = '❌';
+      kick.title = t('waiting.kick', { name: p.name });
+      kick.setAttribute('aria-label', kick.title);
+      kick.addEventListener('click', () => send({ type: 'kick', seat: i }));
+      li.prepend(kick);
+    }
     li.className = p ? '' : 'empty';
     list.appendChild(li);
   });
   $('spectator-count').textContent = room.spectators ? t('waiting.watching', { n: room.spectators }) : '';
-  const isHost = you !== null && you === room.hostSeat;
   renderSettings($('room-settings'), room.settings, isHost, (s) => send({ type: 'settings', settings: s }));
   const full = room.seats.every(Boolean);
   $('start').hidden = !isHost;
@@ -1212,6 +1234,7 @@ function render() {
   `;
   alertScores(game, you);
   autoEl.hidden = you === null || !!view.replay;
+  $('reset-game').hidden = you === null || !!view.replay;
   $('replay-nav').hidden = !view.replay;
   $('replay-options').hidden = !view.replay;
   $('table-hint').hidden = !!view.replay;

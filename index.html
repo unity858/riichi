@@ -7,6 +7,7 @@
   <!-- The site root, relative to this page: the server writes in the right one for each address
        (see PAGES in server.js), and every reference below is relative to it. -->
   <base href="./">
+  <link rel="icon" type="image/svg+xml" href="tiles/tileset2/chun.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -75,6 +76,8 @@
 
   <!-- The table. -->
   <div id="table" class="screen" hidden>
+    <!-- Live games only: asks all four players to go back to the room's waiting page. -->
+    <button id="reset-game" data-i18n="table.reset" hidden>Reset game</button>
     <section class="seat seat-top" data-pos="top"></section>
     <section class="seat seat-left" data-pos="left"></section>
     <div id="middle">
