@@ -1,10 +1,13 @@
 // HTTP static file server + WebSocket game server. The server owns every room's game state;
 // clients only send intents and render the view they're given.
 //
-// Rooms: a player creates a room (getting a random 6-hex-digit code) or joins one by code,
-// under a name of their choosing. Each room has four seats, settings chosen by its host, and
-// its own match. Players are recognised by an id their tab keeps, so reloading a tab gets the
-// same seat back. Before the match starts, a player who leaves frees their seat; once it has
+// Accounts: players sign up and log in (see users.js); the login is a cookie, which the game's
+// WebSocket also carries, so a player is their account, under their username.
+//
+// Rooms: a logged-in player creates a room (getting a random 6-hex-digit code) or joins one by
+// code. Each room has four seats, settings chosen by its host, and its own match. A seat
+// belongs to an account, so reloading, a new tab or another computer logged in to the same
+// account gets the same seat back. Before the match starts, a player who leaves frees their seat; once it has
 // started, the seat is kept for them and anyone else joining watches as a spectator.
 
 import http from 'node:http';
@@ -21,6 +24,7 @@ import {
 import { newMatch, recordHand, handSettings, handLabel, normalizeSettings } from './match.js';
 import { wallFromSeed, seedFromWall } from './seed.js';
 import { openRecorder } from './db.js';
+import { openUsers, SESSION_MS } from './users.js';
 
 // Debugging: NO_DELAYS=1 removes every artificial pause: the three below (each can also be set
 // on its own) and, in the browser, the hold on a win before its result (see viewFor).
@@ -61,6 +65,10 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const RECORD = !process.env.NO_RECORD || process.env.NO_RECORD === '0';
 const DB_PATH = process.env.DB_PATH || path.join(ROOT, 'matches.db');
 const recorder = RECORD ? openRecorder(DB_PATH) : null;
+// Accounts and logins (see users.js): USERS_DB_PATH, default users.db next to this file. Always
+// kept, even with NO_RECORD.
+const USERS_DB_PATH = process.env.USERS_DB_PATH || path.join(ROOT, 'users.db');
+const users = openUsers(USERS_DB_PATH);
 // index.html is served for the pages below; replay.js and seed.js run replays in the browser.
 const STATIC = new Set(['/style.css', '/ui.js', '/i18n.js', '/game.js', '/scoring.js', '/replay.js', '/seed.js']);
 const MIME = { '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript', '.svg': 'image/svg+xml' };
@@ -76,19 +84,92 @@ const TILE_IMAGE = /^\/tiles\/tileset2\/[a-z0-9]+\.svg$/;
 //   /replays                           recent matches, with a search
 //   /replays/match?room=<code>&start=<time>   one match's replay
 //   /game?room=<code>                  a room: its waiting room, then its table
+//   /login[?next=<page>], /signup[?next=<page>]   logging in and signing up, then on to next
 // Any other address is redirected to the main page (an old /?room=<code> link to its room).
-const PAGES = new Set(['/', '/replays', '/replays/match', '/game']);
+// Pages outside PUBLIC need a login: without one they redirect to /login?next=<the page>. A
+// logged-in player opening /login or /signup goes straight on to next.
+const PAGES = new Set(['/', '/replays', '/replays/match', '/game', '/login', '/signup']);
+const PUBLIC = new Set(['/', '/replays', '/replays/match', '/login', '/signup']);
 const toRoot = (pathname) => '../'.repeat(pathname.split('/').length - 2) || './';
 
 function redirect(res, location) {
   res.writeHead(302, { Location: location }).end();
 }
 
+// --- Logins ---
+// The login cookie: the session token from users.js. HttpOnly, so the page's scripts can't read it.
+const COOKIE = 'riichi_session';
+const cookieOf = (req) => {
+  for (const part of (req.headers.cookie ?? '').split(';')) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === COOKIE) return decodeURIComponent(value.join('='));
+  }
+  return null;
+};
+const userOf = (req) => users.user(cookieOf(req));
+function setCookie(req, res, token) {
+  const secure = req.headers['x-forwarded-proto'] === 'https' || req.socket.encrypted ? '; Secure' : '';
+  const age = token ? Math.floor(SESSION_MS / 1000) : 0;
+  res.setHeader('Set-Cookie', `${COOKIE}=${token ?? ''}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${age}${secure}`);
+}
+// Where to go after logging in: next, if it is one of our pages (relative to the site root, e.g.
+// 'game?room=3fa9c1'), else the main page.
+const safeNext = (next) => (typeof next === 'string' && PAGES.has(`/${next.split('?')[0]}`) && !/^(login|signup)\b/.test(next) ? next : '');
+// A JSON request body (logins only: small), or null.
+function readJson(req) {
+  return new Promise((resolve) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 10_000) req.destroy();
+    });
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        resolve(null);
+      }
+    });
+    req.on('error', () => resolve(null));
+  });
+}
+const json = (res, status, data) => {
+  res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+  res.end(JSON.stringify(data));
+};
+// POST api/signup and api/login ({ username, password }) set the cookie and answer { username },
+// or { code } (error.<code> in i18n.js); POST api/logout ends the login. GET api/me answers
+// { username } or { username: null }.
+async function account(req, res, pathname) {
+  if (pathname === '/api/me') return json(res, 200, { username: userOf(req)?.username ?? null });
+  if (req.method !== 'POST') return json(res, 405, { code: 'badRequest' });
+  if (pathname === '/api/logout') {
+    const token = cookieOf(req);
+    users.logout(token);
+    setCookie(req, res, null);
+    // Its open game windows leave their rooms, as if closed.
+    if (token) for (const ws of wss.clients) if (ws.token === token) ws.close();
+    return json(res, 200, { username: null });
+  }
+  const body = await readJson(req);
+  const result = pathname === '/api/signup' ? users.signup(body?.username, body?.password) : users.login(body?.username, body?.password);
+  if (result.error) return json(res, result.error === 'usernameTaken' ? 409 : 400, { code: result.error });
+  setCookie(req, res, result.token);
+  json(res, 200, { username: result.user.username });
+}
+const ACCOUNT_API = new Set(['/api/me', '/api/signup', '/api/login', '/api/logout']);
+
 const server = http.createServer((req, res) => {
   const [pathname, query = ''] = req.url.split('?');
   const room = new URLSearchParams(query).get('room');
   if (pathname === '/' && room) return redirect(res, `game?room=${encodeURIComponent(room)}`);
+  if (ACCOUNT_API.has(pathname)) return void account(req, res, pathname);
   if (PAGES.has(pathname)) {
+    const next = new URLSearchParams(query).get('next');
+    if ((pathname === '/login' || pathname === '/signup') && userOf(req)) return redirect(res, safeNext(next) || toRoot(pathname));
+    if (!PUBLIC.has(pathname) && !userOf(req)) {
+      return redirect(res, `${toRoot(pathname)}login?next=${encodeURIComponent(pathname.slice(1) + (query ? `?${query}` : ''))}`);
+    }
     fs.readFile(path.join(ROOT, 'index.html'), 'utf8', (err, html) => {
       if (err) return res.writeHead(500).end('Error');
       res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
@@ -132,14 +213,10 @@ function newCode() {
   return code;
 }
 
-function cleanName(name) {
-  const trimmed = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 20);
-  return trimmed || 'Player';
-}
-
-// A seat ({ id, name, sockets, auto }) can have several windows connected at once: rejoining by
-// the same player id, or by the same name ("shadowing", e.g. after switching computers), adds a
-// window to the seat. Each window acts for the seat; it is online while any of them is connected.
+// A seat ({ id, name, sockets, auto }) belongs to an account (id user:<n>, name its username) and
+// can have several windows connected at once: rejoining with the same account (a reloaded tab, or
+// another computer) adds a window to the seat. Each window acts for the seat; it is online while
+// any of them is connected.
 const online = (p) => !!p && p.sockets.size > 0;
 const sendSeat = (p, msg) => { for (const ws of p.sockets) send(ws, msg); };
 const connected = (room) => room.seats.filter(online).length + room.spectators.size;
@@ -462,15 +539,10 @@ function joinRoom(ws, room, id, name) {
   leaveRoom(ws);
   ws.room = room;
   const mine = room.seats.findIndex((p) => p?.id === id);
-  const sameName = room.seats.findIndex((p) => p?.name === name);
   if (mine >= 0) {
-    // Same player (a reloaded or duplicated tab): another window for their seat.
+    // Same account (a reloaded tab, a new one, another computer): another window for their seat.
     room.seats[mine].sockets.add(ws);
     room.seats[mine].name = name;
-  } else if (sameName >= 0) {
-    // Shadowing: joining under a seated player's name acts for that seat too (switching
-    // computers, without leaving on the other one).
-    room.seats[sameName].sockets.add(ws);
   } else if (!room.match && room.seats.includes(null)) {
     room.seats[room.seats.indexOf(null)] = { id, name, sockets: new Set([ws]) };
     if (!room.hostId) room.hostId = id;
@@ -505,10 +577,17 @@ function leaveRoom(ws) {
 }
 
 function handle(ws, msg) {
-  const id = typeof msg.id === 'string' ? msg.id.slice(0, 64) : null;
-  const name = cleanName(msg.name);
+  if (msg.type === 'create' || msg.type === 'join') {
+    // Only logged-in windows play; the login is checked again here, in case it has ended.
+    ws.user = users.user(ws.token);
+    if (!ws.user) {
+      send(ws, { type: 'error', code: 'notLoggedIn', message: 'Log in first.' });
+      return;
+    }
+  }
+  const id = ws.user ? `user:${ws.user.id}` : null;
+  const name = ws.user?.username;
   if (msg.type === 'create') {
-    if (!id) return;
     const room = {
       code: newCode(), settings: normalizeSettings(msg.settings), hostId: id,
       seats: [null, null, null, null], spectators: new Set(), match: null, state: null, emptyTimer: null, resetVote: null, joinOrder: null,
@@ -615,8 +694,10 @@ function handle(ws, msg) {
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.room = null;
+  ws.token = cookieOf(req); // the login, if any (see handle)
+  ws.user = users.user(ws.token);
   ws.on('message', (raw) => {
     let msg;
     try {
@@ -632,4 +713,5 @@ wss.on('connection', (ws) => {
 server.listen(PORT, () => {
   console.log(`Mahjong server on http://localhost:${PORT}${NO_DELAYS ? ' (NO_DELAYS: no pauses)' : ''}`);
   console.log(recorder ? `Recording standard matches in ${DB_PATH}` : 'Not recording matches (NO_RECORD)');
+  console.log(`Accounts in ${USERS_DB_PATH}`);
 });

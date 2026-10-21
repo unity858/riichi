@@ -272,6 +272,11 @@ button.selected { outline: 2px solid #1565c0; }
 .lang-picker { margin: -8px 0 12px; font-size: 0.9em; }
 .lang-picker label { margin-right: 10px; }
 
+/* The account line on the main page, and the login and signup forms. */
+.account { margin: 0 0 12px; }
+.account-form { display: flex; flex-direction: column; gap: 10px; max-width: 280px; }
+.account-form button { align-self: flex-start; }
+
 /* "Reset game", in the top left corner of the table. */
 #table { position: relative; }
 #reset-game { position: absolute; top: 8px; left: 8px; z-index: 5; font-size: 0.85em; }

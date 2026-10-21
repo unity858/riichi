@@ -6,18 +6,19 @@ Riichi mahjong game vibe coded with Claude
 npm start
 ```
 
-Open http://localhost:8080, pick a name, and create a room: you get a 6-character room code and an invite link (`/game?room=<code>`). Three more players join with the code or the link; the room's creator (the host) picks the settings and starts the match once all four seats are taken. Several rooms can play at once. Each browser tab is its own player, so you can test alone with 4 tabs; reloading a tab keeps its seat.
+Open http://localhost:8080, sign up (or log in), and create a room: you get a 6-character room code and an invite link (`/game?room=<code>`). Three more players join with the code or the link; the room's creator (the host) picks the settings and starts the match once all four seats are taken. Several rooms can play at once. A player is their account: every tab and computer logged in to it acts for the same seat, and reloading keeps it. So testing alone takes 4 accounts in 4 separate browsers or private windows (tabs of one browser share its login).
 
 Pages:
 
 | Address | Page |
 | --- | --- |
-| `/` | the main page: pick a name, create or join a room |
+| `/` | the main page: create or join a room (Create and Join ask you to log in first) |
 | `/game?room=<code>` | a room: its waiting room, then the table (this is the invite link) |
 | `/replays` | recent recorded matches, with a search (finished ones link to their replay) |
 | `/replays/match?room=<code>&start=<time>` | a finished match's replay; `&hand=<n>&step=<k>` opens a given moment |
+| `/login`, `/signup` | logging in and signing up; `?next=<page>` goes on to that page afterwards |
 
-Any other address redirects to the main page. Every link and file reference is relative to the site root (the server writes a relative `<base href>` into each page), so the game also works behind a proxy at a sub-path. The browser's Back and Forward buttons move between the pages; going Back out of a room leaves it (during a match the seat is kept for you).
+Any other address redirects to the main page. `/game` needs a login: logged out, it redirects to `/login?next=...`, which comes back to the room afterwards (the other pages are open to everyone). Every link and file reference is relative to the site root (the server writes a relative `<base href>` into each page), so the game also works behind a proxy at a sub-path. The browser's Back and Forward buttons move between the pages; going Back out of a room leaves it (during a match the seat is kept for you).
 
 Match settings (chosen by the host before the start):
 
@@ -55,6 +56,7 @@ Environment variables, set before `npm start`; they can be combined:
 | `PORT` | the server port (default 8080) |
 | `DB_PATH` | where to record matches (default `matches.db` next to `server.js`; see below) |
 | `NO_RECORD=1` | don't record matches |
+| `USERS_DB_PATH` | where accounts and logins are kept (default `users.db` next to `server.js`; see below) |
 
 ```
 NO_DELAYS=1 npm start                                 # no pauses at all
@@ -114,6 +116,12 @@ Each kan also moves the last live-wall tile to the dead wall, so the live wall e
 In a Baiman contest everyone's 13th tile is the wild tile `1A` instead, which isn't part of the wall: positions 48-51 aren't dealt, so 48 is the dealer's first draw and 49-121 are the remaining draws.
 
 The server logs every hand's full seed (`Seed: ...`), including random games, so any hand can be replayed. See `seeds/` for examples.
+
+## Accounts
+
+Players sign up with a username (1 to 20 letters and digits, unique ignoring case, shown as typed) and a password (anything but empty). The server keeps them in their own SQLite database (`users.js`; `users.db` by default, kept even with `NO_RECORD`): each password as a salted scrypt hash, and each login as a random token, which the browser holds in an HttpOnly cookie for 30 days (or until Log out). The game's WebSocket carries the cookie too, so the server knows which account each window is; creating or joining a room needs a login. Recorded matches keep the players' usernames.
+
+To start over, stop the server and delete `users.db` (and `users.db-wal`, `users.db-shm`).
 
 ## Tests
 

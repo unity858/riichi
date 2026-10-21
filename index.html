@@ -11,13 +11,15 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Front page: pick a name, then create a room or join one by code. -->
+  <!-- Front page: create a room or join one by code (logged in; see the account line). -->
   <main id="lobby" class="screen" hidden>
     <h1 data-i18n="lobby.heading">Riichi Mahjong</h1>
     <!-- The language, under the heading of the main page, the room's waiting page and Recent
          matches (see i18n.js); the language names are shown as is. -->
     <p class="lang-picker"><label><input type="radio" name="lang-lobby" value="en"> English</label> <label><input type="radio" name="lang-lobby" value="zh"> 简体中文</label></p>
-    <label class="field"><span data-i18n="lobby.name">Your name</span> <input id="name" maxlength="20" autocomplete="nickname"></label>
+    <!-- Who you are: your username and Log out, or links to log in and sign up. -->
+    <p class="account" id="account-in" hidden><span id="account-name"></span> <button id="logout" data-i18n="account.logout">Log out</button></p>
+    <p class="account" id="account-out" hidden><a href="login" data-i18n="account.login">Log in</a> · <a href="signup" data-i18n="account.signup">Sign up</a></p>
     <div class="panels">
       <section class="panel">
         <h2 data-i18n="lobby.createHeading">Create a room</h2>
@@ -32,6 +34,33 @@
     </div>
     <p class="error" id="lobby-error"></p>
     <p><button id="open-matches" data-i18n="lobby.recentMatches">Recent matches</button></p>
+  </main>
+
+  <!-- Logging in, then on to the page in ?next= (the main page if none). -->
+  <main id="login" class="screen" hidden>
+    <h1 data-i18n="login.heading">Log in</h1>
+    <p class="lang-picker"><label><input type="radio" name="lang-login" value="en"> English</label> <label><input type="radio" name="lang-login" value="zh"> 简体中文</label></p>
+    <form id="login-form" class="account-form">
+      <label class="field"><span data-i18n="account.username">Username</span> <input name="username" maxlength="20" autocomplete="username" required></label>
+      <label class="field"><span data-i18n="account.password">Password</span> <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" data-i18n="login.submit">Log in</button>
+      <p class="error" id="login-error"></p>
+    </form>
+    <p><span data-i18n="login.noAccount">No account yet?</span> <a id="to-signup" href="signup" data-i18n="account.signup">Sign up</a></p>
+  </main>
+
+  <!-- Signing up (which logs in), then on to ?next= like the login page. -->
+  <main id="signup" class="screen" hidden>
+    <h1 data-i18n="signup.heading">Sign up</h1>
+    <p class="lang-picker"><label><input type="radio" name="lang-signup" value="en"> English</label> <label><input type="radio" name="lang-signup" value="zh"> 简体中文</label></p>
+    <form id="signup-form" class="account-form">
+      <label class="field"><span data-i18n="account.username">Username</span> <input name="username" maxlength="20" autocomplete="username" required></label>
+      <p class="hint" data-i18n="signup.usernameHint">Letters and digits only, up to 20.</p>
+      <label class="field"><span data-i18n="account.password">Password</span> <input name="password" type="password" autocomplete="new-password" required></label>
+      <button type="submit" data-i18n="signup.submit">Sign up</button>
+      <p class="error" id="signup-error"></p>
+    </form>
+    <p><span data-i18n="signup.haveAccount">Already have an account?</span> <a id="to-login" href="login" data-i18n="account.login">Log in</a></p>
   </main>
 
   <!-- Recent matches: the server's recorded standard matches, newest first, with a search. -->

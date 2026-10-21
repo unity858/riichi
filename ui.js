@@ -1,5 +1,5 @@
 // Renders the server-provided view and sends player intents. No game logic here.
-// Three screens: the lobby (name, create or join a room), the waiting room, and the table.
+// Screens: the lobby (create or join a room), login and signup, the waiting room, and the table.
 // The room code lives in the address (?room=abc123), so a link can be shared.
 
 import { tileLabel, tileIndex, isWild, calledTilePosition, waitYaku, furitenStatus, discardPreview } from './game.js';
@@ -51,7 +51,7 @@ function limitName(limit) {
 }
 // "A and B (and C)", or "A, B, C": joined with the table's join.and or join.comma.
 const joinWith = (key, items) => items.reduce((a, b) => t(key, { a, b }));
-const screens = { lobby: $('lobby'), waiting: $('waiting'), table: $('table'), matches: $('matches'), replay: $('replay') };
+const screens = { lobby: $('lobby'), login: $('login'), signup: $('signup'), waiting: $('waiting'), table: $('table'), matches: $('matches'), replay: $('replay') };
 const infoEl = $('info');
 const nextHandBtn = $('next-hand');
 const rematchBtn = $('rematch');
@@ -99,19 +99,59 @@ let view = null;
 let choosingRiichi = false;
 const ws = new WebSocket(SERVER_URL || socketUrl());
 
-// Each tab is its own player, so its id lives in sessionStorage: reloading keeps your seat,
-// and several tabs in one browser can sit at the same table. Your name is remembered.
-const playerId = sessionStorage.getItem('riichiId') ?? crypto.randomUUID();
-sessionStorage.setItem('riichiId', playerId);
-$('name').value = localStorage.getItem('riichiName') ?? '';
-const myName = () => {
-  const name = $('name').value.trim() || t('player.default');
-  localStorage.setItem('riichiName', name);
-  return name;
+// --- Accounts ---
+// You are your account: the server knows it from the login cookie (on the page's requests and
+// the game's WebSocket alike), and api/me says who that is. Playing needs a login; the game page
+// sends you to log in (the server does too, see PUBLIC in server.js). Logging in, signing up and
+// out reload the page, so the WebSocket connects again with the new cookie.
+let username = null;
+const meReady = fetch(new URL('api/me', ROOT)).then((res) => res.json())
+  .then((me) => { username = me.username ?? null; }, () => {});
+// Where to go after logging in: ?next= if it is one of our pages (e.g. 'game?room=3fa9c1'), so a
+// link can't send you off the site; else the main page.
+const nextPage = () => {
+  const next = query('next') ?? '';
+  return /^(replays|replays\/match|game)?(\?[^#]*)?$/.test(next) && !next.startsWith('?') ? next || './' : './';
 };
+// The login page's address, coming back to next (a page relative to the site root) afterwards.
+const loginAddress = (next) => (next ? `login?next=${encodeURIComponent(next)}` : 'login');
+// The account line on the main page.
+function renderAccount() {
+  $('account-in').hidden = !username;
+  $('account-out').hidden = !!username;
+  if (username) setText($('account-name'), 'account.loggedInAs', { name: username });
+}
+// The login and signup forms: POST to api/login or api/signup, then on to ?next=.
+function accountForm(form, api, errorEl) {
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = form.elements.username.value.trim();
+    const password = form.elements.password.value;
+    if (api === 'signup' && !/^[A-Za-z0-9]{1,20}$/.test(name)) return setText(errorEl, 'error.badUsername');
+    if (!password) return setText(errorEl, 'error.emptyPassword');
+    setText(errorEl, null);
+    let reply;
+    try {
+      const res = await fetch(new URL(`api/${api}`, ROOT), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: name, password }),
+      });
+      reply = await res.json();
+    } catch {
+      reply = { code: 'badRequest' };
+    }
+    if (reply.code) return setText(errorEl, `error.${reply.code}`);
+    location.href = new URL(nextPage(), ROOT).href;
+  });
+}
+accountForm($('login-form'), 'login', $('login-error'));
+accountForm($('signup-form'), 'signup', $('signup-error'));
+$('logout').addEventListener('click', async () => {
+  await fetch(new URL('api/logout', ROOT), { method: 'POST' }).catch(() => {});
+  location.href = ROOT.href;
+});
 
 // The page for the current address, relative to the site root: '' (the main page), 'replays',
-// 'replays/match' or 'game'; and its query.
+// 'replays/match', 'game', 'login' or 'signup'; and its query.
 const route = () => (location.pathname.startsWith(rootPath) ? location.pathname.slice(rootPath.length) : '');
 const query = (key) => new URLSearchParams(location.search).get(key);
 
@@ -135,23 +175,35 @@ function showRoute() {
   if (page === 'game') {
     const code = query('room');
     if (!code) return navigate('./', { replace: true });
+    if (!username) return navigate(loginAddress(`game?room=${code}`), { replace: true });
     if (joinedCode === code) return view && render();
-    // Opening an invite link (or reloading) joins that room straight away if we have a name;
-    // otherwise the main page asks for one, with the code filled in.
+    // Opening an invite link (or reloading) joins that room straight away.
     $('join-code').value = code;
-    if (localStorage.getItem('riichiName')) send({ type: 'join', code, id: playerId, name: myName() });
-    else showScreen('lobby');
+    send({ type: 'join', code });
+  } else if (page === 'login' || page === 'signup') {
+    if (username) return navigate(nextPage(), { replace: true });
+    // The link to the other form keeps next.
+    const next = query('next');
+    $('to-signup').setAttribute('href', next ? `signup?next=${encodeURIComponent(next)}` : 'signup');
+    $('to-login').setAttribute('href', loginAddress(next));
+    setText($(`${page}-error`), null);
+    showScreen(page);
+    $(`${page}-form`).elements.username.focus();
   } else if (page === 'replays') {
     openMatches();
   } else if (page === 'replays/match') {
     showReplay();
   } else {
+    renderAccount();
     showScreen('lobby');
   }
 }
 
 // The game page needs the server; the other pages show straight away (see the end of this file).
-ws.addEventListener('open', () => route() === 'game' && showRoute());
+ws.addEventListener('open', async () => {
+  await meReady;
+  if (route() === 'game') showRoute();
+});
 ws.addEventListener('message', (e) => {
   const msg = JSON.parse(e.data);
   if (msg.type === 'joined') {
@@ -165,6 +217,7 @@ ws.addEventListener('message', (e) => {
     holdTimer = null;
     if (route() === 'game') navigate('./');
   } else if (msg.type === 'error') {
+    if (msg.code === 'notLoggedIn') return void (location.href = new URL(loginAddress(route() === 'game' ? `game${location.search}` : ''), ROOT).href);
     if (!view && route() === 'game') navigate('./', { replace: true });
     // Server messages come as a code (error.<code> in the table) with their values.
     if (msg.code) setText($('lobby-error'), `error.${msg.code}`, msg.params);
@@ -632,14 +685,19 @@ document.addEventListener('keydown', (e) => {
 $('replay-back').addEventListener('click', () => navigate('replays'));
 $('matches-search').addEventListener('input', renderMatches);
 
-$('create').addEventListener('click', () => send({ type: 'create', id: playerId, name: myName(), settings: createSettings }));
+// Logged out, Create and Join go to the login page first (Join coming back to the room).
+$('create').addEventListener('click', () => {
+  if (!username) return navigate(loginAddress(''));
+  send({ type: 'create', settings: createSettings });
+});
 $('join').addEventListener('click', () => {
   const code = $('join-code').value.trim().toLowerCase();
   if (!/^[0-9a-f]{6}$/.test(code)) {
     setText($('lobby-error'), 'lobby.badCode');
     return;
   }
-  send({ type: 'join', code, id: playerId, name: myName() });
+  if (!username) return navigate(loginAddress(`game?room=${code}`));
+  send({ type: 'join', code });
 });
 $('copy-link').addEventListener('click', async () => {
   await navigator.clipboard?.writeText(location.href);
@@ -1344,4 +1402,4 @@ for (const input of document.querySelectorAll('.lang-picker input')) {
 applyStatic();
 
 // The page for the address this tab opened at (the game page waits for the server, above).
-if (route() !== 'game') showRoute();
+meReady.then(() => route() !== 'game' && showRoute());
